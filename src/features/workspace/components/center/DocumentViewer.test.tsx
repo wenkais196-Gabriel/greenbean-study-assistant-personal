@@ -407,7 +407,9 @@ describe("DocumentViewer", () => {
       getRangeAt: () => ({}),
     } as unknown as Selection);
     render(<DocumentViewer {...defaultProps} selectedSectionId="ch1-1" />);
-    document.dispatchEvent(new Event("selectionchange"));
+    act(() => {
+      document.dispatchEvent(new Event("selectionchange"));
+    });
     expect(mockGetSelection).toHaveBeenCalled();
     mockGetSelection.mockRestore();
   });
