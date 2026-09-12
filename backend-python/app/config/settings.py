@@ -1,7 +1,7 @@
 ﻿"""
 Python 后端的集中运行配置。
 
-⚠️ 这些是**起点值**，不是定论：切块参数与 embedding 模型都将由评测集 A/B 调整
+⚠️ 这些是**起点值**，不是定论：切块参数、检索参数与 embedding 模型都将由评测集 A/B 调整
 （见 planning/12-路线图v2 §3.3、planning/08 §2.2）。
 """
 
@@ -21,3 +21,9 @@ MAX_EMBED_CHARS = 1000
 # ---- 切块（按字符计）----
 DEFAULT_CHUNK_SIZE = 800
 DEFAULT_CHUNK_OVERLAP = 120
+
+# ---- 检索 ----
+# top_k 与距离阈值都是**评测调优的起点**；阈值默认为 None（先不过滤），
+# 必须由评测数据决定，见 docs/specs/us-stage1-retrieval.md §9-A1
+RETRIEVAL_TOP_K = 5
+RETRIEVAL_MAX_DISTANCE: float | None = None
