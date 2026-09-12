@@ -14,12 +14,21 @@ GreenBean Study Assistant 是面向在法国学习的中文学生的 AI 课程�
 [`GreenBeanICE/greenbean-study-assistant`](https://github.com/GreenBeanICE/greenbean-study-assistant)（MIT）。
 **本仓库是该上游的个人 fork 续作**：上游自 2026-06 起停止推进，本 fork 在其基础上独立继续开发。
 
-当前施工重心是打通「解析 → 切块 → 检索 → Agent → 带引用回答」这条链路，落点在三处：
+**2026-09-12 更新：这条链路已经打通**（上传 → 解析 → 落库 → 切块 → 向量化 → 检索 → 带引用回答）。
+三处的现状与下一步：
 
-- `backend-python/app/rag/`：全文占位，检索、上下文组装、索引构建都要在这里实现。
-- `backend-python/app/tools/`：全文占位，面向 Agent 的工具定义与实现。
-- `backend-python/app/agents/`：可运行，但都是单轮"拼 prompt → 调一次 provider → 解析 JSON"，
-  没有 tool calling、没有多步编排、没有检索闭环；`ChatAgent` 目前用的是硬编码 mock 上下文。
+- `backend-python/app/rag/`：**已实现**（`retriever` / `context_builder` / `vector_index_builder`）；
+  中文提问实测 HitRate@5 66.7% / @20 100%（见 `docs/retrieval-diagnosis.md`）。
+- `backend-python/app/tools/`：6 个工具**已实现但尚未接生产对象** —— 每个工具 docstring 里都写了明确待办
+  （检索适配器、workspace 过滤、按 workspace 查询的仓储方法）。
+- `backend-python/app/agents/`：`RouterAgent`（三分类 + 降级）与 `ChatAgent` **已接真实检索上下文**
+  （上下文由 `ChatService` 注入，不再是 mock）；仍是**单轮编排** —— tool calling / 多步编排 / 结构化 trace 待阶段 2。
+
+两条闭环的规格：`docs/specs/us-stage1-ingest.md`、`docs/specs/us-stage1-chat.md`。
+
+**生产向量配置（2026-09-12 起）**：`intfloat/multilingual-e5-large`（1024 维，序列上限 512 token）。
+e5 系列要求 query / passage 前缀，由 `settings.EMBEDDING_QUERY_PREFIX` / `EMBEDDING_PASSAGE_PREFIX` 配置；
+**换模型会改维度，必须重建 vec0 索引**（`init_db` 在维度不一致时会明确报错）。
 
 上游团队已完成、可直接复用的部分：文档解析器、文档摄取管线、持久化层、领域实体和前端
 工作区界面。改动这些代码时保持其原有分层与命名，不要顺手重写。
@@ -45,7 +54,8 @@ GreenBean Study Assistant 是面向在法国学习的中文学生的 AI 课程�
 - `src/lib/`：前端通用库。`title.ts` 目前只有 `normalizeTitle`，有对应 Vitest 测试。
 - `src-tauri/`：Tauri 桌面端。当前实际注册的 command 只有 `greet`，其他 commands、DTO、services、db、errors 模块均为后续扩展占位。
 - `backend-python/app/`：Python 后端主体，按 `api`、`schemas`、`services`、`repositories`、`entities`、`enums`、`parsers`、`rag`、`tools`、`agents`、`prompts`、`providers`、`utils`、`config`、`db` 分层。
-- `backend-python/tests/`：Python 测试，分 `unit/`（`agents`、`api`、`entities`、`parsers`、`prompts`、`providers`、`services`、`utils`）与 `integration/`（`api`、`document`、`persistence`）两层，共用 `conftest.py` 和 `fixtures/`。
+- `backend-python/tests/`：Python 测试，分 `unit/`（`agents`、`api`、`entities`、`parsers`、`prompts`、`providers`、`services`、`tools`、`utils`）与 `integration/`（`api`、`document`、`persistence`）两层，共用 `conftest.py` 和 `fixtures/`。
+- `docs/`：公开文档。`specs/` 放各批 US 规格（chunking / vector-index / embedding / retrieval / ingest / chat）；根目录放实验与诊断报告（`eval-report.md`、`retrieval-diagnosis.md`）。
 - `data/`：本地数据目录。只应保留 `.gitkeep`，数据库和用户上传文件不应提交。
 - `coverage/`：测试覆盖率输出目录，不应提交。
 - `.github/workflows/quality.yml`：CI 分前端、Python、Rust 三个 job 跑测试并上传覆盖率 artifact。（fork 中已删除上游的 SonarQube 扫描 job 与 `.github/dependabot.yml`。）
@@ -121,8 +131,14 @@ python -m pip install -r requirements-dev.txt
 
 ## 当前注意事项
 
-- 很多模块是占位文件，不要误认为功能已完成。实现功能时应同时补测试。
-- `rag/`、`tools/`、`services/chunk_service.py`、`services/embedding_service.py` 在覆盖率报告里显示为 0 行，这是预期现状，不是遗漏。
+- 后端主链路（`rag/`、`tools/`、`services/`、`api/`）已实现；**仍为占位的**只有：
+  `agents/{study,todo}_agent.py`、`api/{analysis,export,section}_controller.py`、
+  `rag/{page_index_builder,reranker}.py`、`services/{document_unit,export,prompt_context,section}_service.py`、
+  `repositories/prompt_context_repository.py`、`entities/prompt_context.py`、若干 `schemas/*` 与 `enums/*`。
+  动手前先确认，不要按文件名假设已完成；实现功能时应同时补测试。
+- `backend-python/tests/.coveragerc` 里 `fail_under = 100`：**覆盖率是硬门槛**。只跑 `pytest tests` 看不出问题，
+  提交前请跑 `pytest --cov=app --cov-config=tests/.coveragerc`（或 `npm run test:python:coverage`）。
+  本仓库**不使用** `pragma: no cover` 豁免 —— 未覆盖的分支要写测试，或说明为什么它是不可达的防御分支。
 - Python 实体和测试中的部分中文描述当前呈现为乱码，疑似历史编码问题。除非任务要求修复编码，否则不要顺手大范围改写，以免扩大变更。
 - `planning/` 是本地私有的规划与决策记录（已加入 `.gitignore`），不要提交到仓库，也不要把它当作公开文档改写。
 - `data/*.db`、`data/uploads/*`、`coverage/`、`node_modules/`、Python 缓存和 Rust `target/` 都应保持未跟踪。
