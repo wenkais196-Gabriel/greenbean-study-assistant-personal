@@ -30,7 +30,7 @@ def test_pdf_parser_extracts_text_from_real_pdf(
     assert all(page["char_count"] == len(page["content"]) for page in pages)
     assert all(page["content"] for page in pages)
     assert all(page["parser_name"] == "PDFParser" for page in pages)
-    assert all(page["parser_version"] == "1.0.0" for page in pages)
+    assert all(page["parser_version"] == "1.1.0" for page in pages)
     assert all(page["metadata"]["source_type"] == "pdf" for page in pages)
 
 
