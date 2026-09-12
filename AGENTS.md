@@ -14,17 +14,22 @@ GreenBean Study Assistant 是面向在法国学习的中文学生的 AI 课程�
 [`GreenBeanICE/greenbean-study-assistant`](https://github.com/GreenBeanICE/greenbean-study-assistant)（MIT）。
 **本仓库是该上游的个人 fork 续作**：上游自 2026-06 起停止推进，本 fork 在其基础上独立继续开发。
 
-**2026-09-12 更新：这条链路已经打通**（上传 → 解析 → 落库 → 切块 → 向量化 → 检索 → 带引用回答）。
-三处的现状与下一步：
+**2026-09-12 更新：阶段 1 主链路已闭合**（上传 → 解析 → 落库 → 切块 → 向量化 → 检索 → 带来源回答），
+并补上了上传进度反馈、结构化 trace 与可重复的检索评测。各处现状：
 
 - `backend-python/app/rag/`：**已实现**（`retriever` / `context_builder` / `vector_index_builder`）；
-  中文提问实测 HitRate@5 66.7% / @20 100%（见 `docs/retrieval-diagnosis.md`）。
+  46 条 golden set 实测 **HitRate@5 90.0% / @20 97.5% / MRR 0.845**（[`docs/eval-report-golden.md`](docs/eval-report-golden.md)）。
+  ⚠️ 这个数字与此前 12 条的 66.7% **口径不同、不可直接比较**（判定方式、数据集、`chunk_size` 都变了）。
 - `backend-python/app/tools/`：6 个工具**已实现但尚未接生产对象** —— 每个工具 docstring 里都写了明确待办
   （检索适配器、workspace 过滤、按 workspace 查询的仓储方法）。
-- `backend-python/app/agents/`：`RouterAgent`（三分类 + 降级）与 `ChatAgent` **已接真实检索上下文**
-  （上下文由 `ChatService` 注入，不再是 mock）；仍是**单轮编排** —— tool calling / 多步编排 / 结构化 trace 待阶段 2。
+- `backend-python/app/agents/`：`RouterAgent`（三分类 + 降级，降级与否记在 `degraded`）与 `ChatAgent`
+  **已接真实检索上下文**（由 `ChatService` 注入，不再是 mock）；仍是**单轮编排** ——
+  tool calling / 多步编排待阶段 2。
+- 可观测性：结构化 trace 已落地（`agent_traces` 表 + `GET /api/traces/{trace_id}`）。
+- 评测：`eval/` 有 46 条 golden set 与 L1 跑分脚本；**L2 生成层（引用准确率 / 拒答正确率）尚未做**，
+  需要 LLM provider key。
 
-两条闭环的规格：`docs/specs/us-stage1-ingest.md`、`docs/specs/us-stage1-chat.md`。
+闭环规格：`docs/specs/us-stage1-ingest.md`、`us-stage1-chat.md`、`us-stage1-upload-async.md`、`us-stage1-trace.md`。
 
 **生产向量配置（2026-09-12 起）**：`intfloat/multilingual-e5-large`（1024 维，序列上限 512 token）。
 e5 系列要求 query / passage 前缀，由 `settings.EMBEDDING_QUERY_PREFIX` / `EMBEDDING_PASSAGE_PREFIX` 配置；
@@ -51,11 +56,12 @@ e5 系列要求 query / passage 前缀，由 `settings.EMBEDDING_QUERY_PREFIX` /
 - `src/features/analysis/`：分析目标、分析类型和分析结果展示的前端占位。
 - `src/features/chat/`：继续追问、消息列表和 Prompt 上下文面板的前端占位。
 - `src/features/export/`：导出入口占位。
-- `src/lib/`：前端通用库。`title.ts` 目前只有 `normalizeTitle`，有对应 Vitest 测试。
+- `src/lib/`：前端通用库。`title.ts`（`normalizeTitle`）、`upload.ts`（上传 + 进度轮询的协议封装，含超时与错误映射），均有对应 Vitest 测试。
 - `src-tauri/`：Tauri 桌面端。当前实际注册的 command 只有 `greet`，其他 commands、DTO、services、db、errors 模块均为后续扩展占位。
 - `backend-python/app/`：Python 后端主体，按 `api`、`schemas`、`services`、`repositories`、`entities`、`enums`、`parsers`、`rag`、`tools`、`agents`、`prompts`、`providers`、`utils`、`config`、`db` 分层。
 - `backend-python/tests/`：Python 测试，分 `unit/`（`agents`、`api`、`entities`、`parsers`、`prompts`、`providers`、`services`、`tools`、`utils`）与 `integration/`（`api`、`document`、`persistence`）两层，共用 `conftest.py` 和 `fixtures/`。
-- `docs/`：公开文档。`specs/` 放各批 US 规格（chunking / vector-index / embedding / retrieval / ingest / chat）；根目录放实验与诊断报告（`eval-report.md`、`retrieval-diagnosis.md`）。
+- `docs/`：公开文档。`specs/` 放各批 US 规格（chunking / vector-index / embedding / retrieval / ingest / chat / upload-async / trace）；根目录放实验与诊断报告（`eval-report.md`、`eval-report-golden.md`、`retrieval-diagnosis.md`）。
+- `eval/`：L1 检索评测（`golden_set.jsonl` + `run_eval.py`）。**零 LLM 成本、完全可重复**，走生产链路并自带口径自检；判定口径与已知局限见 [`eval/README.md`](eval/README.md)。
 - `data/`：本地数据目录。只应保留 `.gitkeep`，数据库和用户上传文件不应提交。
 - `coverage/`：测试覆盖率输出目录，不应提交。
 - `.github/workflows/quality.yml`：CI 分前端、Python、Rust 三个 job 跑测试并上传覆盖率 artifact。（fork 中已删除上游的 SonarQube 扫描 job 与 `.github/dependabot.yml`。）
@@ -71,6 +77,8 @@ e5 系列要求 query / passage 前缀，由 `settings.EMBEDDING_QUERY_PREFIX` /
 - `EmbeddingVector`：`Chunk` 的语义向量，校验 `vector` 长度必须等于 `vector_dimension`，并且必须关联到已存在的 `Chunk`。
 - `AnalysisResult`：AI 分析结果，支持全文分析和章节分析；章节分析必须有 `section_id`，全文分析不能设置 `section_id`。
 - `ChatSession` / `ChatMessage`：工作区或文档范围内的会话和消息，消息角色为 `user` 或 `agent`。
+- `IngestJob`：一次上传摄取任务（`queued → running → succeeded / failed`），承载阶段进度与可序列化摘要；**落库**而非放内存，以便重启后仍可查。
+- `AgentTrace`：一条结构化 span（属性对齐 OTel `gen_ai.*`，本项目扩展用 `greenbean.*` 前缀）；一次提问或一次上传的 span 共享同一个 `trace_id`。
 
 ## 后端设计意图
 
@@ -107,6 +115,12 @@ npm run test:coverage:sonar
 npm run tauri -- dev
 ```
 
+L1 检索评测（走生产链路，零 LLM 成本；需要指定含 PDF 的语料目录）：
+
+```bash
+python eval/run_eval.py --docs-dir "<语料目录>" --out docs/eval-report-golden.md
+```
+
 Python 依赖安装：
 
 ```bash
@@ -128,14 +142,28 @@ python -m pip install -r requirements-dev.txt
 - CI 使用 Node.js 22、Python 3.12，并在 Linux 上安装 Tauri 所需系统依赖。
 - `sonar-project.properties` 是上游遗留的 SonarQube 配置，本 fork 不再运行扫描，保留仅供参考。
 - 图片 OCR 解析器的测试使用 mock，不需要本机安装 Tesseract 引擎。
+- ⚠️ `tsc --noEmit` **当前不是绿的**：`App.test.tsx`、`DocumentViewer.tsx`、`WorkspacePage.tsx` 等**未改动**文件上有既存的
+  `noUnusedLocals` 报错。CI 只跑 vitest、不跑 tsc，所以这些错误不影响流水线 —— 但新增代码别再往上加新的。
 
 ## 当前注意事项
 
-- 后端主链路（`rag/`、`tools/`、`services/`、`api/`）已实现；**仍为占位的**只有：
+- 后端主链路（`rag/`、`tools/`、`services/`、`api/`）已实现，且**上传（异步 + 进度）与问答（带来源）两条闭环已打通**；
+  **仍为占位的**只有：
   `agents/{study,todo}_agent.py`、`api/{analysis,export,section}_controller.py`、
   `rag/{page_index_builder,reranker}.py`、`services/{document_unit,export,prompt_context,section}_service.py`、
   `repositories/prompt_context_repository.py`、`entities/prompt_context.py`、若干 `schemas/*` 与 `enums/*`。
   动手前先确认，不要按文件名假设已完成；实现功能时应同时补测试。
+- ⚠️ **SQLite 只允许一个写者**（本 fork 已踩过两次）：**不要在数据库事务内部去写别的表**
+  （上传任务进度、trace 都算），否则必然 `database is locked`，而且加 `busy_timeout` 也救不了
+  —— 持锁的就是同一个线程。解法是把耗时计算挪到事务之外，让写操作各自成事务。
+  见 [`docs/specs/us-stage1-upload-async.md`](docs/specs/us-stage1-upload-async.md) §3.2 与
+  [`docs/specs/us-stage1-trace.md`](docs/specs/us-stage1-trace.md) §3.4。
+- 两张新增表都遵循"纯新增 + `CREATE TABLE IF NOT EXISTS`"：`ingest_jobs`（上传任务进度）、
+  `agent_traces`（结构化 trace）。旧库启动时会自动补建；换 embedding 模型仍需重建 vec0 索引，
+  这两张表不受影响。
+- `eval/` 是评测集的家：改动检索 / 切块 / embedding 模型后应跑一次
+  `python eval/run_eval.py --docs-dir "<含 PDF 的语料目录>"`。它走**生产链路**并自带口径自检
+  （关键词是否真出现在期望页、no_answer 是否其实有答案）—— 首轮报告正是在这两点上栽过。
 - `backend-python/tests/.coveragerc` 里 `fail_under = 100`：**覆盖率是硬门槛**。只跑 `pytest tests` 看不出问题，
   提交前请跑 `pytest --cov=app --cov-config=tests/.coveragerc`（或 `npm run test:python:coverage`）。
   本仓库**不使用** `pragma: no cover` 豁免 —— 未覆盖的分支要写测试，或说明为什么它是不可达的防御分支。

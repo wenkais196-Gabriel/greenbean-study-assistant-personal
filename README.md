@@ -24,13 +24,20 @@
 |---|---|
 | 文档解析（`app/parsers/`）、文档摄取（`app/services/`）、持久化（`app/db/`、`app/repositories/`）、实体（`app/entities/`） | 已实现，有测试覆盖 |
 | 前端工作区界面（`src/features/workspace/`） | 已实现，有测试覆盖 |
-| 检索链路（`app/rag/`）、Agent 工具（`app/tools/`）、切块与向量化（`app/services/chunk_service.py`、`embedding_service.py`） | **占位，尚未实现** |
-| `ChatAgent` | 使用硬编码的 mock 检索上下文，待接入真实检索 |
+| 检索链路（`app/rag/`）、切块与向量化（`app/services/chunk_service.py`、`embedding_service.py`） | 已实现，有测试覆盖 |
+| 上传（异步受理 + 进度轮询）与问答闭环（`POST /api/documents/upload`、`POST /api/chat`） | 已实现，有测试覆盖 |
+| 结构化 trace（`agent_traces`，字段对齐 OTel `gen_ai.*`） | 已实现 |
+| L1 检索评测（`eval/`） | 已实现：46 条 golden set，零 LLM 成本、完全可重复 |
+| Agent 工具（`app/tools/`） | 已实现，但**尚未接生产对象**（每个工具 docstring 里写了待办） |
+| Agent 编排（`app/agents/`） | **单轮**：路由 → 检索 → 带来源回答；tool calling / 多步编排待阶段 2 |
+| 生成层评测（L2：引用准确率 / 拒答正确率） | 未做 —— 需要 LLM provider key |
 
 实测基线（本机 Windows / Python 3.12 / Node 24）：
 
-- Python：`228 passed`，覆盖率 `100%`
-- 前端：`233 passed`（10 个测试文件），语句覆盖率 `96.45%`
+- Python：`425 passed`，覆盖率 `100%`（`fail_under=100` 硬门槛）
+- 前端：`246 passed`（11 个测试文件）
+- 检索（L1，40 条可评测）：HitRate@5 `90.0%`、@20 `97.5%`、MRR `0.845`
+  —— 见 [`docs/eval-report-golden.md`](docs/eval-report-golden.md)、[`eval/README.md`](eval/README.md)
 
 ## 快速开始
 
