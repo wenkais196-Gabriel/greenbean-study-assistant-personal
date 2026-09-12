@@ -2,6 +2,7 @@
 文本工具模块，用于封装清洗、截断和格式化辅助逻辑。
 """
 import re
+import unicodedata
 from typing import List, Optional
 
 
@@ -107,3 +108,48 @@ def detect_language(text: str) -> str:
         return "fr"
     else:
         return "en"
+
+# PDF（PyMuPDF）提取部分文件时，会把法语重音拆成「修饰符 + 基字母」：
+#   général → g´en´eral ／ à → `a ／ reconnaître → reconnaˆıtre
+# 方向实测全部是"修饰符在字母之前"，因此按「交换位置 + NFC 合成」还原。
+BROKEN_ACCENT_MARKS: dict[str, str] = {
+    "`": "\u0300",  # U+0060 grave
+    "´": "\u0301",  # U+00B4 acute
+    "ˆ": "\u0302",  # U+02C6 circumflex
+    "˜": "\u0303",  # U+02DC tilde
+    "¨": "\u0308",  # U+00A8 diaeresis
+    "¸": "\u0327",  # U+00B8 cedilla
+}
+
+# 修饰符的两种形态：独立字符（PDF 拆裂产物）与组合符（可能已被拆到字母之前）
+_BROKEN_ACCENT_CLASS = "`´ˆ˜¨¸\u0300\u0301\u0302\u0303\u0308\u0327"
+
+# 「修饰符 + 基字母」：只匹配裸字母（含 dotless ı），所以已被正常提取的 `é` 不会被二次改动
+_BROKEN_ACCENT_PATTERN = re.compile(
+    rf"(?P<mark>[{_BROKEN_ACCENT_CLASS}])(?P<base>[A-Za-z\u0131])"
+)
+
+
+def repair_broken_accents(text: str) -> tuple[str, int]:
+    """
+    还原 PDF 提取时被拆开的法语重音。
+
+    做法：先把修饰符搬到基字母之后（即 NFD 的 base + combining mark 顺序），
+    再交给 NFC 合成预组合字符；`ı`（dotless i）+ circumflex 无法被 NFC 合成，单独替换为 `î`。
+
+    ⚠️ 刻意**不处理** ASCII 的 `^` 与 `~`：技术资料里它们可能是幂运算（`x^n`）或约等号，
+    把后一个字母合成重音会破坏原文。
+
+    :param text: 原始文本
+    :return: (修复后的文本, 修复处数)；处数供解析器写入 metadata，便于观测污染规模
+    """
+    if not text:
+        return "", 0
+
+    def _swap(match: "re.Match[str]") -> str:
+        mark = match.group("mark")
+        return match.group("base") + BROKEN_ACCENT_MARKS.get(mark, mark)
+
+    repaired, repairs = _BROKEN_ACCENT_PATTERN.subn(_swap, text)
+    repaired = repaired.replace("\u0131\u0302", "\u00ee")  # ı + ˆ → î
+    return unicodedata.normalize("NFC", repaired), repairs

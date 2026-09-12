@@ -10,6 +10,7 @@ from app.utils.text_utils import (
     contains_chinese,
     contains_french,
     detect_language,
+    repair_broken_accents,
 )
 
 
@@ -162,3 +163,52 @@ class TestDetectLanguage:
 
     def test_short_text(self):
         assert detect_language("Hi") == "en"
+
+class TestRepairBrokenAccents:
+    """测试 repair_broken_accents 函数（PDF 提取把重音拆成「修饰符 + 基字母」时的还原）"""
+
+    def test_repairs_acute_before_letter(self):
+        repaired, repairs = repair_broken_accents("g´en´eral")
+
+        assert repaired == "général"
+        assert repairs == 2
+
+    def test_repairs_multiple_marks_in_a_sentence(self):
+        repaired, repairs = repair_broken_accents("Introduction `a l'IA et mani`ere g´en´erale")
+
+        assert repaired == "Introduction à l'IA et manière générale"
+        # `à`、`manière`、`générale`（两处重音）→ 共 4 处
+        assert repairs == 4
+
+    def test_repairs_dotless_i_circumflex(self):
+        """`reconnaître` 会被拆成 `reconnaˆıtre`（dotless ı + circumflex），NFC 合不出 î，需单独还原。"""
+        repaired, repairs = repair_broken_accents("reconnaˆıtre")
+
+        assert repaired == "reconnaître"
+        assert repairs == 1
+
+    def test_repairs_cedilla(self):
+        repaired, repairs = repair_broken_accents("¸c")
+
+        assert repaired == "ç"
+        assert repairs == 1
+
+    def test_leaves_correctly_extracted_accents_untouched(self):
+        text = "général déjà français"
+
+        repaired, repairs = repair_broken_accents(text)
+
+        assert repaired == text
+        assert repairs == 0
+
+    def test_does_not_touch_caret_and_tilde(self):
+        """`^` 与 `~` 在技术资料里可能是幂运算 / 约等号，不能被合成重音。"""
+        text = "x^n ~ 1 et 2^3"
+
+        repaired, repairs = repair_broken_accents(text)
+
+        assert repaired == text
+        assert repairs == 0
+
+    def test_empty_text(self):
+        assert repair_broken_accents("") == ("", 0)

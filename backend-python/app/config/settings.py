@@ -23,7 +23,20 @@ DEFAULT_CHUNK_SIZE = 800
 DEFAULT_CHUNK_OVERLAP = 120
 
 # ---- 检索 ----
-# top_k 与距离阈值都是**评测调优的起点**；阈值默认为 None（先不过滤），
-# 必须由评测数据决定，见 docs/specs/us-stage1-retrieval.md §9-A1
-RETRIEVAL_TOP_K = 5
+# top_k：诊断实验（docs/retrieval-diagnosis.md §3.2）显示中文提问 HitRate@5 仅 50%，
+# 放宽到 @20 达 83.3%（修重音后 91.7%）—— 失败样本大多排在第 6~20 名，不是召不回来，
+# 因此由 5 上调到 20。代价是进入上下文的片段变多 —— 由 ContextBuilder 的
+# CONTEXT_MAX_CHARS 预算裁剪兜底（超预算的片段整片丢弃）。
+RETRIEVAL_TOP_K = 20
+
+# max_distance：默认为 None（先不过滤），阈值必须由评测数据决定。
+# ⚠️ 距离口径是 vec0 默认的**非平方 L2（欧氏距离）**，不是平方 L2 ——
+# 实测与自算平方 L2 偏差 9.906、与自算欧氏距离偏差 0.000001，设阈值时按这个口径。
 RETRIEVAL_MAX_DISTANCE: float | None = None
+
+# ---- 上下文组装 ----
+# 进入 LLM 的上下文规模上限（按字符近似）：法文实测约 4.3 字符/token，
+# 8000 字符 ≈ 1900 token，给 8k 上下文窗口的模型留出 query / 历史 / 输出的余量。
+# ⚠️ 这是近似规模控制（不加载 tokenizer）；精确的 token 预算应由 provider 的
+# 上下文窗口决定，等阶段 2 接入 provider 时替换。
+CONTEXT_MAX_CHARS = 8000

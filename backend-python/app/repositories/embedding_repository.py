@@ -141,7 +141,9 @@ class EmbeddingRepository:
     ) -> list[tuple[str, float]]:
         """按距离升序返回 top_k 个最相近的 chunk。
 
-        vec0 的 KNN 查询天然按距离升序返回，距离用其默认度量（L2 平方距离）。
+        vec0 的 KNN 查询天然按距离升序返回，距离用其默认度量 ——
+        **非平方 L2（欧氏距离）**，不是平方 L2：实测与自算平方 L2 偏差 9.906、
+        与自算欧氏距离偏差 0.000001（见 docs/retrieval-diagnosis.md §3.4）。
         若日后要改成 cosine，需要在写入与查询前对向量做归一化。
         """
         self._validate_dimension(vector)
