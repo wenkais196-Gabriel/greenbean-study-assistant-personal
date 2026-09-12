@@ -25,7 +25,8 @@
 | `RETRIEVAL_TOP_K` 5 → 20 | ✅ 已实施（`app/config/settings.py`） |
 | 解析阶段还原重音 | ✅ 已实施（`app/utils/text_utils.repair_broken_accents` + `PDFParser` 升到 1.1.0，处数写入 `metadata.accent_repairs`） |
 | 更正 vec0 距离口径 | ✅ 已实施（代码注释 + 本报告 + [`eval-report.md`](eval-report.md) §2.2 + 两份 spec） |
-| `top_k=20` 的代价侧：上下文预算裁剪 | ✅ 已实施（`ContextBuilder.build_within_budget`，`CONTEXT_MAX_CHARS=8000` 软上限；spec AC11/AC12） |
+| `top_k=20` 的代价侧：上下文预算裁剪 | ✅ 已实施（`ContextBuilder.build_within_budget`，`CONTEXT_MAX_CHARS=8000` 软上限；spec AC11/AC12）；
+实测当前**不触发裁剪**，见 §3.6 |
 | 换更强的多语言模型 / 混合检索 / token 感知切块 | ⬜ 未实施（见 §5） |
 
 **生产链路校验**：本报告数据由 `experiment_diagnosis.py` 的 `verify_production_parser()` 逐页比对 ——
@@ -125,6 +126,23 @@
 期望片段集合大小 **p50 = 7 个 chunk**（min 1、max 26）——即"只要召回任一个含关键词的片段就算命中"，
 门槛相当宽松，命中率仍只有 50%~91.7%。→ **真实可用性不优于这张表。**
 
+### 3.6 上下文预算的实测（2026-09-12 补测）
+
+`RETRIEVAL_TOP_K=20` 配 `CONTEXT_MAX_CHARS=8000` 在当前语料上的实测
+（`experiment_diagnosis.py` 的 `describe_context_budget()`，中文 12 条 query 取中位数）：
+
+| 条件 | 召回 | 保留 | 丢弃 | `used_chars` | 渲染后上下文 |
+|---|---|---|---|---|---|
+| raw | 20 条 | **20 条** | **0 条** | 7520 | 7838 字符 |
+| repaired（= 当前生产） | 20 条 | **20 条** | **0 条** | 7767 | 8076 字符 |
+
+**结论：`CONTEXT_MAX_CHARS=8000` 目前不触发裁剪。** 片段实际平均只有约 **376 字符**
+（不是 `chunk_size=500` 的上限 —— 切点被对齐到段落分隔符，很多片段更短），
+20 条合计约 7800 字符，刚好被 8000 容下。
+
+→ 它现在的角色是**防异常超长的保险**，不是生效的约束。
+若要真正控制上下文规模 / 成本，必须先按 provider 的上下文窗口把这个值收紧跟。
+
 ---
 
 ## 4. 结论
@@ -156,6 +174,6 @@
 4. **度量对照不完全对称**：L2 排名限 top-50（vec0 KNN），cos 为全量 408 → 对 cos 略有利，而 cos 依然没赢。
 5. **未做**：混合检索、重排、模型对照、无答案类查询（拒答能力）、token 感知切块。
 6. **单一 `chunk_size`**：本诊断固定 500（首测已证 500/800 打平、300 更差）。
-7. **修复后的上层效果仍未测**：`top_k=20` 会让每次问答进入约 4 倍片段。已用 `ContextBuilder.build_within_budget`
-   （`CONTEXT_MAX_CHARS=8000` 的**软上限**：超预算整片丢弃、至少留 1 条）钉住规模，
-   但"预算该取多大""丢掉尾部片段会不会丢掉答案"必须由真实 LLM provider 度量 —— 本报告只覆盖召回侧。
+7. **修复后的上层效果仍未测**：`top_k=20` 让每次问答进入约 4 倍**数量**的片段（字符量见 §3.6：
+   实测约 7800 字符、未触发预算裁剪）。"20 条一起喂 vs 5 条"对回答质量、TTFT 与 token 成本的影响
+   必须由真实 LLM provider 度量 —— 本报告只覆盖召回侧与上下文规模侧。

@@ -209,6 +209,8 @@ Feature: 语义召回与上下文组装
 - **A6**（2026-09-12 新增）：上下文预算按**字符**近似（`CONTEXT_MAX_CHARS` 默认 8000 ≈ 法文 1900 token）。
   精确的 token 预算应由 provider 的上下文窗口决定，留待阶段 2 接入 provider 时替换；
   本批只钉住规模上限，不度量它对回答质量与延迟的影响。
+  实测（2026-09-12）：`top_k=20` 的真实召回合计约 7800 字符、**当前不触发裁剪**，
+  见 [`retrieval-diagnosis.md`](../retrieval-diagnosis.md) §3.6。
 
 ---
 

@@ -37,7 +37,12 @@ import numpy as np  # noqa: E402
 from fastembed import TextEmbedding  # noqa: E402
 from sqlalchemy import select  # noqa: E402
 
-from app.config.settings import EMBEDDING_DIMENSION, EMBEDDING_MODEL  # noqa: E402
+from app.config.settings import (  # noqa: E402
+    CONTEXT_MAX_CHARS,
+    EMBEDDING_DIMENSION,
+    EMBEDDING_MODEL,
+    RETRIEVAL_TOP_K,
+)
 from app.db.init_db import initialize_database, load_sqlite_vec_extension  # noqa: E402
 from app.db.models import ChunkModel, EmbeddingVectorModel  # noqa: E402
 from app.db.orm import create_database_engine, create_session_factory  # noqa: E402
@@ -51,6 +56,8 @@ from app.repositories.embedding_repository import EmbeddingRepository  # noqa: E
 from app.services.chunk_service import ChunkService  # noqa: E402
 from app.services.embedding_service import EmbeddingService  # noqa: E402
 from app.utils.text_utils import repair_broken_accents  # noqa: E402
+from app.rag.context_builder import ContextBuilder  # noqa: E402
+from app.rag.retriever import Retriever  # noqa: E402
 from app.rag.vector_index_builder import VectorIndexBuilder  # noqa: E402
 
 
@@ -358,6 +365,42 @@ def describe_vec0_distance(
     )
 
 
+def describe_context_budget(
+    session,
+    embedding_repository: EmbeddingRepository,
+    embedding_service: EmbeddingService,
+) -> str:
+    """用生产配置（RETRIEVAL_TOP_K + CONTEXT_MAX_CHARS）实测「召回 → 预算裁剪」的真实结果。
+
+    这一段不需要 LLM：它回答"20 条召回里有多少真的进得了上下文、上下文有多长"。
+    中文 query 与前面的评测口径一致。
+    """
+    retriever = Retriever(embedding_service, top_k=RETRIEVAL_TOP_K)
+    builder = ContextBuilder(ChunkRepository(session), DocumentUnitRepository(session))
+
+    def median(values: list[int]) -> int:
+        return int(np.median(values))
+
+    recalled: list[int] = []
+    kept: list[int] = []
+    dropped: list[int] = []
+    used: list[int] = []
+    rendered: list[int] = []
+    for query, _ in QUERIES_ZH:
+        hits = retriever.retrieve(embedding_repository, query)
+        selection = builder.build_within_budget(hits, max_chars=CONTEXT_MAX_CHARS)
+        recalled.append(len(hits))
+        kept.append(len(selection.items))
+        dropped.append(len(selection.dropped_chunk_ids))
+        used.append(selection.used_chars)
+        rendered.append(len(builder.render(selection.items)))
+
+    return (
+        f"召回 {median(recalled)} 条 → 保留 {median(kept)} 条（丢弃 {median(dropped)} 条），"
+        f"used_chars 中位数 {median(used)}，渲染后上下文 {median(rendered)} 字符"
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="跨语言检索命中率低——根因诊断实验")
     parser.add_argument("--docs-dir", required=True, help="包含法语课程 PDF 的目录")
@@ -417,6 +460,7 @@ def main() -> None:
     workdir = Path(tempfile.mkdtemp(prefix="gb-diagnosis-"))
     conditions: list[Condition] = []
     norms: dict[str, tuple[float, float]] = {}
+    budget_reports: list[tuple[str, str]] = []
     vec0_check = ""
     try:
         for variant in ("raw", "repaired"):
@@ -475,6 +519,9 @@ def main() -> None:
                             + " ".join(f"@{k}={condition.hit_rate(k):.0%}" for k in KS)
                             + f" MRR={condition.mrr:.3f}"
                         )
+                budget_reports.append(
+                    (variant, describe_context_budget(session, repository, embedding_service))
+                )
             index.engine.dispose()  # type: ignore[attr-defined]
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
@@ -503,6 +550,10 @@ def main() -> None:
         f"\n判定口径松紧：期望片段集合大小 p50={int(np.median(expected_all))} "
         f"min={min(expected_all)} max={max(expected_all)}（集合越大越容易命中）"
     )
+
+    print(f"\n上下文预算实测（RETRIEVAL_TOP_K={RETRIEVAL_TOP_K}、CONTEXT_MAX_CHARS={CONTEXT_MAX_CHARS}）：")
+    for variant, report in budget_reports:
+        print(f"  {variant:<9}: {report}")
 
     header = (
         f"{'条件':<22}"

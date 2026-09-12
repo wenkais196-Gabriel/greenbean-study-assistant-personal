@@ -37,6 +37,8 @@ RETRIEVAL_MAX_DISTANCE: float | None = None
 # ---- 上下文组装 ----
 # 进入 LLM 的上下文规模上限（按字符近似）：法文实测约 4.3 字符/token，
 # 8000 字符 ≈ 1900 token，给 8k 上下文窗口的模型留出 query / 历史 / 输出的余量。
-# ⚠️ 这是近似规模控制（不加载 tokenizer）；精确的 token 预算应由 provider 的
-# 上下文窗口决定，等阶段 2 接入 provider 时替换。
+# ⚠️ 实测（docs/retrieval-diagnosis.md §3.6）：top_k=20 的真实召回合计只有约 7800 字符
+# （片段平均 376 字符，而非 chunk_size 上限 500），**当前不会触发裁剪** ——
+# 它是防异常超长的保险，不是生效的约束；要真正控规模得先按 provider 窗口收紧这个值。
+# 近似规模控制（不加载 tokenizer）；精确 token 预算应由 provider 的上下文窗口决定。
 CONTEXT_MAX_CHARS = 8000
