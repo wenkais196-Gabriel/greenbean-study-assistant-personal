@@ -33,5 +33,15 @@ class OpenAICompatibleProvider(AIProvider):
             kwargs["response_format"] = response_format
 
         response = await self._client.chat.completions.create(**kwargs)
-        content = response.choices[0].message.content
-        return ChatResult(content=content)
+        choice = response.choices[0]
+        usage = getattr(response, "usage", None)
+
+        # 用量与模型名供 trace 与成本基线使用（docs/specs/us-stage1-trace.md AC3）：
+        # 兼容端点不保证回传，取不到就留 None。
+        return ChatResult(
+            content=choice.message.content,
+            input_tokens=getattr(usage, "prompt_tokens", None),
+            output_tokens=getattr(usage, "completion_tokens", None),
+            model=getattr(response, "model", None),
+            finish_reason=getattr(choice, "finish_reason", None),
+        )

@@ -16,12 +16,13 @@
 所以流水线是"先算完再写"，进度回调落在无锁的事务之外
 （见 docs/specs/us-stage1-upload-async.md §3.2）。
 
-`on_progress` 是**可选观测点**：上传异步化后，客户端靠它看到"走到哪一步了"。
-不传它，本服务的行为与从前完全一致。
+`on_progress` 与 `trace_recorder` 都是**可选观测点**：不传它们，本服务的行为与从前完全一致。
+trace 的 span 同样只在事务之外写（见 docs/specs/us-stage1-trace.md §3.4）。
 """
 import os
 import time
-from typing import Callable
+from contextlib import nullcontext
+from typing import Callable, ContextManager
 
 from app.config.settings import EMBEDDING_DIMENSION, EMBEDDING_MODEL
 from app.db.orm import SessionFactory
@@ -29,6 +30,7 @@ from app.entities import Chunk, DocumentRecord, DocumentUnit
 from app.enums.document_file_type import DocumentFileType
 from app.enums.document_status import DocumentStatus
 from app.enums.ingest_stage import IngestStage
+from app.enums.trace_status import TraceStatus
 from app.parsers.parser_factory import ParserFactory
 from app.rag.vector_index_builder import VectorIndexBuilder
 from app.repositories.chunk_repository import ChunkRepository
@@ -37,6 +39,8 @@ from app.repositories.document_unit_repository import DocumentUnitRepository
 from app.repositories.embedding_repository import EmbeddingRepository
 from app.services.chunk_service import ChunkService
 from app.services.embedding_service import EmbeddingService
+from app.services.trace_recorder import TraceRecorder, elapsed_ms
+from app.utils.trace_context import bind_trace, current_trace_id, reset_trace
 
 # source_type → DocumentFileType 映射常量
 SOURCE_TYPE_TO_FILE_TYPE: dict[str, DocumentFileType] = {
@@ -62,6 +66,7 @@ class DocumentIngestService:
         embedding_service: EmbeddingService | None = None,
         embedding_model: str = EMBEDDING_MODEL,
         embedding_dimension: int = EMBEDDING_DIMENSION,
+        trace_recorder: TraceRecorder | None = None,
     ) -> None:
         """
         :param session_factory: 会话工厂；**注入即开启完整摄取**（切块 + 嵌入 + 落库），
@@ -70,12 +75,16 @@ class DocumentIngestService:
         :param embedding_service: 嵌入服务，默认懒加载生产配置（**测试请注入假模型**）
         :param embedding_model: 写入 `embedding_vectors.embedding_model` 供追溯
         :param embedding_dimension: 向量维度，必须与建库时的 vec0 维度一致
+        :param trace_recorder: 结构化 trace 记录器；**默认不记录**，由调用方显式注入。
+            这里刻意不 fallback 到生产单例：多一个默认值，就会让既有构造点（尤其测试）
+            悄悄开始往生产库写 span —— 这个坑在实现本批时真的踩到了。
         """
         self.session_factory = session_factory
         self.chunk_service = chunk_service or ChunkService()
         self.embedding_service = embedding_service
         self.embedding_model = embedding_model
         self.embedding_dimension = embedding_dimension
+        self.trace_recorder = trace_recorder
 
     def ingest_document(
         self,
@@ -87,6 +96,7 @@ class DocumentIngestService:
         file_path: str = "",
         file_hash: str | None = None,
         on_progress: ProgressCallback | None = None,
+        job_id: str | None = None,
     ) -> dict:
         """
         贯穿整个文件流的摄取流水线。
@@ -98,14 +108,68 @@ class DocumentIngestService:
         :param file_path: 原始文件在本地 uploads 目录下的路径
         :param file_hash: 原始文件哈希值
         :param on_progress: 阶段进度回调（可选），供上传进度反馈消费
+        :param job_id: 上传任务 ID（可选），写进 trace 便于与 `ingest_jobs` 对照
         :return: 解析结果字典，含 document_record / document_units / chunks_created / elapsed_seconds
         """
+        token = bind_trace(current_trace_id())
+        started = time.perf_counter()
+        try:
+            result = self._ingest(
+                filename,
+                file_content,
+                workspace_id=workspace_id,
+                title=title,
+                file_path=file_path,
+                file_hash=file_hash,
+                on_progress=on_progress,
+            )
+        except Exception as exc:
+            self._record(
+                "ingest.document",
+                elapsed_ms(started),
+                status=TraceStatus.ERROR,
+                error=f"{type(exc).__name__}: {exc}",
+                **{
+                    "greenbean.ingest.filename": filename,
+                    "greenbean.ingest.job_id": job_id,
+                },
+            )
+            raise
+        else:
+            self._record(
+                "ingest.document",
+                elapsed_ms(started),
+                **{
+                    "greenbean.ingest.filename": filename,
+                    "greenbean.ingest.pages": result["total_pages"],
+                    "greenbean.ingest.chunks_created": result["chunks_created"],
+                    "greenbean.ingest.elapsed_seconds": result["elapsed_seconds"],
+                    "greenbean.ingest.job_id": job_id,
+                },
+            )
+            return result
+        finally:
+            reset_trace(token)
+
+    def _ingest(
+        self,
+        filename: str,
+        file_content: bytes,
+        *,
+        workspace_id: str,
+        title: str | None,
+        file_path: str,
+        file_hash: str | None,
+        on_progress: ProgressCallback | None,
+    ) -> dict:
+        """摄取主体（由 `ingest_document` 包上 trace 与 trace 上下文）。"""
         started = time.perf_counter()
 
         # ---- Step 1: 通过工厂匹配解析器并提取 PageIndex 原始单页文本 ----
         self._report(on_progress, IngestStage.PARSING, 0.0)
-        parser = ParserFactory.get_parser(filename)
-        parsed_pages = parser.parse(file_content)
+        with self._stage_span("ingest.parsing"):
+            parser = ParserFactory.get_parser(filename)
+            parsed_pages = parser.parse(file_content)
         self._report(on_progress, IngestStage.PARSING, 1.0)
 
         # ---- Step 2: 基于 PageIndex 构造 DocumentRecord ----
@@ -163,9 +227,11 @@ class DocumentIngestService:
         chunks_created = 0
         if self.session_factory is not None:
             chunks = self.chunk_service.split_units(document_units)
-            vectors = self._embed_chunks(chunks, on_progress)
+            with self._stage_span("ingest.embedding"):
+                vectors = self._embed_chunks(chunks, on_progress)
             self._report(on_progress, IngestStage.PERSISTING, 0.0)
-            self._persist(document_record, document_units, chunks, vectors)
+            with self._stage_span("ingest.persisting"):
+                self._persist(document_record, document_units, chunks, vectors)
             self._report(on_progress, IngestStage.PERSISTING, 1.0)
             chunks_created = len(chunks)
 
@@ -246,6 +312,36 @@ class DocumentIngestService:
             self._vector_builder().write_vectors(embedding_repository, chunks, vectors)
 
             session.commit()
+
+    def _stage_span(self, span_name: str) -> ContextManager[None]:
+        """阶段 span 的上下文管理器；没接 recorder 时是空操作。
+
+        属性在进入时就已确定（这里只有阶段名），所以用 `span()` 就够；
+        需要"结束时才知道"的属性（页数、片段数）走 `_record`。
+        """
+        if self.trace_recorder is None:
+            return nullcontext()
+        return self.trace_recorder.span(span_name)
+
+    def _record(
+        self,
+        span_name: str,
+        duration_ms: float,
+        *,
+        status: TraceStatus = TraceStatus.OK,
+        error: str | None = None,
+        **attributes: object,
+    ) -> None:
+        """写一条 span；没接 recorder 时什么都不做。"""
+        if self.trace_recorder is None:
+            return
+        self.trace_recorder.record_span(
+            span_name=span_name,
+            duration_ms=duration_ms,
+            attributes=dict(attributes),
+            status=status,
+            error=error,
+        )
 
     @staticmethod
     def _report(

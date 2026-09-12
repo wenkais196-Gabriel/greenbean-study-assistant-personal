@@ -5,6 +5,7 @@ from app.enums.document_status import DocumentStatus
 from app.enums.ingest_job_status import IngestJobStatus
 from app.enums.ingest_stage import IngestStage
 from app.enums.message_role import MessageRole
+from app.enums.trace_status import TraceStatus
 from app.enums.workspace_defaults import DEFAULT_WORKSPACE_TYPES
 
 __all__ = [
@@ -16,4 +17,5 @@ __all__ = [
     "IngestJobStatus",
     "IngestStage",
     "MessageRole",
+    "TraceStatus",
 ]

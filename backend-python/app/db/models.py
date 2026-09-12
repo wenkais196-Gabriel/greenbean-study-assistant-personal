@@ -177,6 +177,20 @@ class IngestJobModel(Base):
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 
 
+class AgentTraceModel(Base):
+    __tablename__ = "agent_traces"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    trace_id: Mapped[str] = mapped_column(Text, nullable=False)
+    parent_id: Mapped[str | None] = mapped_column(Text)
+    span_name: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    duration_ms: Mapped[float] = mapped_column(Float, nullable=False)
+    attributes_json: Mapped[str | None] = mapped_column(Text)
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+
 class AppMetadataModel(Base):
     __tablename__ = "app_metadata"
 

@@ -102,6 +102,7 @@ class IngestJobService:
                 workspace_id=workspace_id,
                 title=title,
                 on_progress=lambda stage, ratio: self._report_progress(job_id, stage, ratio),
+                job_id=job_id,
             )
         except Exception as exc:  # noqa: BLE001 —— worker 里必须兜住一切
             self._update(

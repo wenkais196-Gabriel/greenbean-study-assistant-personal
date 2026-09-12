@@ -64,3 +64,9 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:5173",
     "tauri://localhost",
 ]
+
+# ---- 可观测性 ----
+# 结构化 trace 的总开关：关闭时不写任何 span、也不提供查询（见 docs/specs/us-stage1-trace.md AC9）。
+# 目前是全量记录（一次提问 4 条 span、一次上传 4 条）—— 本地单机够用；
+# 高流量下应改为按比例采样，而不是靠这个开关一刀切。
+TRACE_ENABLED = True

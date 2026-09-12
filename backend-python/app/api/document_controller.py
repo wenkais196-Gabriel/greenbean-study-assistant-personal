@@ -17,6 +17,7 @@ from app.db.runtime import lazy_session_factory
 from app.schemas.upload_schema import IngestJobPayload
 from app.services.document_ingest_service import DocumentIngestService
 from app.services.ingest_job_service import IngestJobService
+from app.services.trace_recorder import production_trace_recorder
 from app.utils.file_utils import is_supported, get_extension
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
@@ -47,7 +48,10 @@ def get_job_service() -> IngestJobService:
     """
     return IngestJobService(
         session_factory=lazy_session_factory(),
-        ingest_service=DocumentIngestService(session_factory=lazy_session_factory()),
+        ingest_service=DocumentIngestService(
+            session_factory=lazy_session_factory(),
+            trace_recorder=production_trace_recorder(),
+        ),
     )
 
 

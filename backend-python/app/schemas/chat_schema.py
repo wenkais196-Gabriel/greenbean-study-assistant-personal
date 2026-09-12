@@ -25,6 +25,10 @@ class ChatResponse(BaseModel):
     session_id: str = Field(..., description="会话 ID。")
     answer: str = Field(..., description="AI 生成的回答。")
     source_context: list[dict[str, Any]] | None = Field(default=None, description="回答引用的检索上下文。")
+    trace_id: str | None = Field(
+        default=None,
+        description="本次链路的追踪 ID，可用 GET /api/traces/{trace_id} 取回全部 span。",
+    )
 
 
 class ChatSessionCreateRequest(BaseModel):

@@ -260,6 +260,20 @@ def _create_schema(connection: sqlite3.Connection, embedding_dimension: int) -> 
             updated_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS agent_traces (
+            id TEXT PRIMARY KEY,
+            trace_id TEXT NOT NULL,
+            parent_id TEXT,
+            span_name TEXT NOT NULL,
+            status TEXT NOT NULL,
+            duration_ms REAL NOT NULL,
+            attributes_json TEXT,
+            error TEXT,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_agent_traces_trace_id ON agent_traces (trace_id);
+
         CREATE TABLE IF NOT EXISTS app_metadata (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL

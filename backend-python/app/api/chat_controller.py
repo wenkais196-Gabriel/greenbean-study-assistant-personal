@@ -10,6 +10,7 @@ from app.db.runtime import lazy_session_factory
 from app.providers.registry import ProviderNotFoundError
 from app.schemas.chat_schema import ChatRequest, ChatResponse
 from app.services.chat_service import ChatService
+from app.services.trace_recorder import production_trace_recorder
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
@@ -26,8 +27,15 @@ _RESPONSE_400_AND_503 = {**_RESPONSE_400_BAD_REQUEST, **_RESPONSE_503_UNAVAILABL
 
 
 def get_chat_service() -> ChatService:
-    """依赖注入：会话工厂懒加载（见 app/db/runtime），构造时不碰磁盘。"""
-    return ChatService(session_factory=lazy_session_factory())
+    """依赖注入：会话工厂懒加载（见 app/db/runtime），构造时不碰磁盘。
+
+    trace 关闭时 `production_trace_recorder()` 返回 `None`，链路走无 trace 路径
+    （见 docs/specs/us-stage1-trace.md AC9）。
+    """
+    return ChatService(
+        session_factory=lazy_session_factory(),
+        trace_recorder=production_trace_recorder(),
+    )
 
 
 @router.post(
@@ -44,6 +52,7 @@ async def ask(
 
     返回的 `source_context` 与上下文块里的 `[来源 N]` 一一对应，
     前端据此把回答里的引用映射回具体的片段 / 文档 / 页码。
+    `trace_id` 可用于 `GET /api/traces/{trace_id}` 取回这次链路的完整 span。
     """
     if not request.query.strip():
         raise HTTPException(
