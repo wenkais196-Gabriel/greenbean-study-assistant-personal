@@ -51,3 +51,11 @@ RETRIEVAL_MAX_DISTANCE: float | None = None
 # 它是防异常超长的保险，不是生效的约束；要真正控规模得先按 provider 窗口收紧这个值。
 # 近似规模控制（不加载 tokenizer）；精确 token 预算应由 provider 的上下文窗口决定。
 CONTEXT_MAX_CHARS = 8000
+
+# ---- API ----
+# 允许跨域的前端来源：vite dev server（vite.config.ts 固定 5173）与 Tauri 壳。
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "tauri://localhost",
+]

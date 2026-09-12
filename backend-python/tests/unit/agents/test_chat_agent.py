@@ -126,3 +126,42 @@ async def test_chat_agent_provider_error_handling(MockClassifyRegistry, MockChat
         await agent.generate_response(request)
 
     assert "Provider API timeout" in str(exc_info.value)
+
+
+@pytest.mark.us("US-STAGE1-AGENT-CHAT-01")
+@pytest.mark.asyncio
+@patch("app.agents.chat_agent.ProviderRegistry")
+@patch("app.agents.classification_agent.ProviderRegistry")
+async def test_generate_response_uses_passed_context_and_returns_sources(
+    MockClassifyRegistry, MockChatRegistry
+):
+    """AC-CHAT-01.4：调用方传入的检索上下文必须进 prompt，来源必须原样带回。
+
+    这样 ChatAgent 就不需要自己检索（分层：检索归 ChatService）。
+    """
+    mock_router_provider = MagicMock()
+    mock_router_provider.chat_completion = AsyncMock(
+        return_value=ChatResult(content='{"route": "CONCEPT", "reason": "test"}')
+    )
+    MockClassifyRegistry.get_active.return_value = mock_router_provider
+
+    mock_chat_provider = MagicMock()
+    mock_chat_provider.chat_completion = AsyncMock(
+        return_value=ChatResult(content="答案 [来源 1]")
+    )
+    MockChatRegistry.get_active.return_value = mock_chat_provider
+
+    sources = [{"chunk_id": "c1", "document_id": "doc-1", "page_number": 3}]
+    agent = ChatAgent()
+    request = ChatRequest(session_id="s-ctx", query="监督学习是什么？")
+
+    response = await agent.generate_response(
+        request,
+        context="[来源 1]\nLe polymorphisme...",
+        sources=sources,
+    )
+
+    prompt = mock_chat_provider.chat_completion.call_args.kwargs["messages"][-1]["content"]
+    assert "Le polymorphisme" in prompt
+    assert "监督学习是什么？" in prompt
+    assert response.source_context == sources

@@ -1,11 +1,23 @@
-﻿# Python 后端应用入口占位文件，后续用于创建 FastAPI 应用并注册路由。
-# backend-python/app/main.py
+"""Python 后端应用入口：创建 FastAPI 应用、注册路由与 CORS。"""
 from fastapi import FastAPI
-from app.api import document_controller  # 引入你的控制器
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.api import chat_controller, document_controller
+from app.config.settings import CORS_ALLOWED_ORIGINS
 
 app = FastAPI(title="Greenbean Study Assistant API")
+
+# 前端 dev server（vite 固定 5173）与 Tauri 壳都从**别的 origin** 发起请求，必须放行。
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # 注册文档上传解析的路由
 app.include_router(document_controller.router, prefix="/api")
 
-# ... 你的其他 main.py 配置（如 CORS、其他路由等）
+# 注册聊天（提问 → 检索 → 带来源回答）的路由
+app.include_router(chat_controller.router, prefix="/api")
