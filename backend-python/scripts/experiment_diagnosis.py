@@ -39,7 +39,6 @@ from sqlalchemy import select  # noqa: E402
 
 from app.config.settings import (  # noqa: E402
     CONTEXT_MAX_CHARS,
-    EMBEDDING_DIMENSION,
     EMBEDDING_MODEL,
     RETRIEVAL_TOP_K,
 )
@@ -65,8 +64,8 @@ from app.rag.vector_index_builder import VectorIndexBuilder  # noqa: E402
 KS = (1, 3, 5, 10, 20)
 # 排名诊断的检索深度
 DEPTH = 50
-# 模型的序列上限：超过它的片段会被 tokenizer 截断
-MODEL_MAX_TOKENS = 128
+# tokenizer 未提供 truncation 配置时的兜底上限（正常路径都从 tokenizer 读实际值）
+FALLBACK_MAX_TOKENS = 128
 
 # 中文提问 / 法语提问 → 期望命中的法文关键词（两套 query 一一对应，判定口径相同）
 QUERIES_ZH: list[tuple[str, str]] = [
@@ -126,6 +125,46 @@ def token_lengths(tokenizer, texts: list[str]) -> list[int]:
     finally:
         if original is not None:
             tokenizer.enable_truncation(original)
+
+
+def model_dimension(model_name: str) -> int:
+    """从 fastembed 的模型表查维度；查不到直接退出（避免维度不匹配静默写库）。"""
+    for entry in TextEmbedding.list_supported_models():
+        if entry["model"] == model_name:
+            return int(entry["dim"])
+    raise SystemExit(f"fastembed 不支持这个模型（无法确定维度）：{model_name}")
+
+
+def needs_e5_prefix(model_name: str) -> bool:
+    """e5 系列要求 `query:` / `passage:` 前缀；不加会明显拉低它自己的分数、让对照失真。"""
+    return "e5" in model_name.lower()
+
+
+class PrefixedEmbeddingService:
+    """给输入加 e5 前缀的一层包装。
+
+    只影响送给模型的文本，**不改 chunk 存储文本、也不动生产代码**：
+    MiniLM 不需要前缀，而生产链路没有前缀概念，所以这层只存在于对照实验里。
+    """
+
+    def __init__(
+        self,
+        inner: EmbeddingService,
+        *,
+        query_prefix: str,
+        passage_prefix: str,
+    ) -> None:
+        self.inner = inner
+        self.query_prefix = query_prefix
+        self.passage_prefix = passage_prefix
+
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        return self.inner.embed_texts([self.passage_prefix + text for text in texts])
+
+    def embed_query(self, text: str) -> list[float]:
+        return self.inner.embed_query(self.query_prefix + text)
 
 
 def parse_documents(docs_dir: Path) -> list[tuple[str, list[dict]]]:
@@ -197,19 +236,21 @@ def build_index(
     variant: str,
     workdir: Path,
     embedding_service: EmbeddingService,
+    dimension: int,
+    embedding_model: str,
 ) -> Index:
     """按 variant 处理语料文本，切块、嵌入并写入临时库。"""
     result = initialize_database(
         data_dir=workdir / variant,
         database_name="diagnosis.sqlite3",
-        embedding_dimension=EMBEDDING_DIMENSION,
+        embedding_dimension=dimension,
     )
     engine = create_database_engine(
         result.database_path, sqlite_vec_loader=load_sqlite_vec_extension
     )
     session_factory = create_session_factory(engine)
     chunk_service = ChunkService(chunk_size=chunk_size, chunk_overlap=max(1, chunk_size // 8))
-    builder = VectorIndexBuilder(embedding_service, embedding_model=EMBEDDING_MODEL)
+    builder = VectorIndexBuilder(embedding_service, embedding_model=embedding_model)
 
     total = 0
     with session_factory() as session:  # type: ignore[operator]
@@ -242,7 +283,7 @@ def build_index(
                 chunks = [with_text(chunk, repair_broken_accents(chunk.text_content)[0]) for chunk in chunks]
             ChunkRepository(session).save_batch(chunks)
 
-            repository = EmbeddingRepository(session, embedding_dimension=EMBEDDING_DIMENSION)
+            repository = EmbeddingRepository(session, embedding_dimension=dimension)
             total += builder.build_for_chunks(repository, chunks)
         session.commit()
 
@@ -410,13 +451,30 @@ def main() -> None:
         default=str(Path.home() / ".cache" / "fastembed"),
         help="fastembed 模型缓存目录",
     )
+    parser.add_argument(
+        "--embedding-model",
+        default=EMBEDDING_MODEL,
+        help="fastembed 模型名（默认 MiniLM-L12-v2；对照可传 intfloat/multilingual-e5-large）",
+    )
+    parser.add_argument(
+        "--dimension",
+        type=int,
+        default=None,
+        help="向量维度；默认按模型名从 fastembed 的模型表自动查",
+    )
     args = parser.parse_args()
 
     docs_dir = Path(args.docs_dir)
     if not docs_dir.is_dir():
         raise SystemExit(f"目录不存在：{docs_dir}")
 
-    print(f"模型：{EMBEDDING_MODEL}（{EMBEDDING_DIMENSION} 维，序列上限 {MODEL_MAX_TOKENS} token）")
+    dimension = args.dimension or model_dimension(args.embedding_model)
+    prefix_note = (
+        "｜已加 query:/passage: 前缀（e5 系列要求，不加则对照不公平）"
+        if needs_e5_prefix(args.embedding_model)
+        else "｜按模型原生输入（不加前缀）"
+    )
+    print(f"模型：{args.embedding_model}（{dimension} 维）{prefix_note}")
     print(f"资料目录：{docs_dir}")
 
     print("\n解析文档（PyMuPDF 原样提取＝未修复基线）……")
@@ -446,11 +504,24 @@ def main() -> None:
     print(f"  语料字符数：{sum(len(t) for t in raw_texts)}（{len(raw_texts)} 个 chunk）")
     print(f"  重音拆裂修复处数：{repaired_count}（按页面文本统计，不含 chunk overlap 重复）")
 
-    embedding_service = EmbeddingService(
-        model_factory=lambda name: TextEmbedding(name, cache_dir=args.cache_dir)
+    base_service = EmbeddingService(
+        model_name=args.embedding_model,
+        dimension=dimension,
+        model_factory=lambda name: TextEmbedding(name, cache_dir=args.cache_dir),
     )
-    embedding_service.embed_texts(["warmup"])  # 触发模型加载，让后续耗时只计推理
-    tokenizer = embedding_service._get_model().model.tokenizer  # type: ignore[attr-defined]
+    base_service.embed_texts(["warmup"])  # 触发模型加载，让后续耗时只计推理
+    tokenizer = base_service._get_model().model.tokenizer  # type: ignore[attr-defined]
+    # 序列上限必须从 tokenizer 读：MiniLM 是 128，e5-large 更大 —— 硬编码会误判截断比例
+    max_tokens = _truncation_max_length(tokenizer.truncation) or FALLBACK_MAX_TOKENS
+    print(f"  tokenizer 序列上限：{max_tokens} token")
+
+    embedding_service: EmbeddingService | PrefixedEmbeddingService
+    if needs_e5_prefix(args.embedding_model):
+        embedding_service = PrefixedEmbeddingService(
+            base_service, query_prefix="query: ", passage_prefix="passage: "
+        )
+    else:
+        embedding_service = base_service
 
     token_counts = {
         "raw": token_lengths(tokenizer, raw_texts),
@@ -471,6 +542,8 @@ def main() -> None:
                 variant=variant,
                 workdir=workdir,
                 embedding_service=embedding_service,
+                dimension=dimension,
+                embedding_model=args.embedding_model,
             )
             tokens = token_counts[variant]
             print(
@@ -480,7 +553,7 @@ def main() -> None:
             )
 
             with index.session_factory() as session:  # type: ignore[operator]
-                repository = EmbeddingRepository(session, embedding_dimension=EMBEDDING_DIMENSION)
+                repository = EmbeddingRepository(session, embedding_dimension=dimension)
                 ids, matrix = load_vectors(session)
                 chunk_rows = session.execute(
                     select(ChunkModel.id, ChunkModel.text_content)
@@ -530,14 +603,17 @@ def main() -> None:
     print("\n" + "=" * 100)
     print("诊断结果")
     print("=" * 100)
-    print(f"\nchunk_size={args.chunk_size}，检索深度={DEPTH}，判定口径=关键词包含（空白折叠）")
+    print(
+        f"\n模型={args.embedding_model}（{dimension} 维），chunk_size={args.chunk_size}，"
+        f"检索深度={DEPTH}，判定口径=关键词包含（空白折叠）"
+    )
     print("\n语料 token 长度（**已关闭 tokenizer 自带的截断**，按 chunk 统计）：")
     for variant, tokens in token_counts.items():
-        over = sum(1 for n in tokens if n > MODEL_MAX_TOKENS)
+        over = sum(1 for n in tokens if n > max_tokens)
         print(
             f"  {variant:<9}: p50={int(np.percentile(tokens, 50))} "
             f"p90={int(np.percentile(tokens, 90))} max={max(tokens)}，"
-            f"超过 {MODEL_MAX_TOKENS} token（会被截断）的片段 {over}/{len(tokens)}"
+            f"超过 {max_tokens} token（会被截断）的片段 {over}/{len(tokens)}"
             f"（{over / len(tokens):.1%}）"
         )
     print(

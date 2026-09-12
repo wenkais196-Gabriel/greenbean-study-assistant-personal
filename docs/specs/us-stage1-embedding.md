@@ -1,6 +1,8 @@
 # US · 阶段 1 第三批：把片段向量化并写入本地索引
 
-> **状态：已确认（含"文本截断"，2026-09-12）** —— Gate 1 通过，进入 Gate 2（先写测试）
+> **状态：已确认（含"文本截断"，2026-09-12）**
+> 附注（2026-09-12 模型对照）：`multilingual-e5-large` 的序列上限是 **512**（MiniLM 是 128），
+> 换模型即可消除截断问题；对照数据见 [`retrieval-diagnosis.md`](../retrieval-diagnosis.md) §3.7。 —— Gate 1 通过，进入 Gate 2（先写测试）
 > 依据：[`planning/08`](../../planning/08-技术选型决策记录.md) §2.2（fastembed 选型）、[`planning/06`](../../planning/06-代码现状全景.md) §4（断点 ⑥）、上游 spec §4.4
 > 前置：第二批已完成（`embedding_index` vec0 表可用、`save_to_index` / `search_similar` 已就绪）
 > 流程：本文档（✅ 确认）→ Gate 2（先写测试，确认 Red）→ **你确认** → Gate 3（最小实现）
