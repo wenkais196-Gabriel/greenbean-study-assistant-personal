@@ -5,7 +5,9 @@ from typing import Annotated
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from fastapi import status as http_status
+from fastapi.concurrency import run_in_threadpool
 
+from app.db.runtime import lazy_session_factory
 from app.services.document_ingest_service import DocumentIngestService
 from app.utils.file_utils import is_supported, get_extension
 
@@ -27,8 +29,11 @@ _SUPPORTED_FORMATS_MSG = (
 
 
 def get_ingest_service() -> DocumentIngestService:
-    """依赖注入：确保每个请求能正确拿到 IngestService 实例。"""
-    return DocumentIngestService()
+    """依赖注入：每个请求拿一个 IngestService；会话工厂懒加载（见 app/db/runtime）。
+
+    注入 session_factory 即开启**完整摄取**：解析 → 落库 → 切块 → 向量化。
+    """
+    return DocumentIngestService(session_factory=lazy_session_factory())
 
 
 @router.post(
@@ -66,8 +71,11 @@ async def upload_document(
         if not file_content:
             raise HTTPException(status_code=400, detail="文件内容为空")
         
-        # 进入导入流水线
-        result = ingest_service.ingest_document(file.filename, file_content)
+        # 进入导入流水线：解析 + 落库 + 切块 + 向量化是**同步且可能耗时**的
+        # （e5 嵌入实测约 200 ms/片段），必须放线程池，否则会阻塞事件循环、拖垮整个服务。
+        result = await run_in_threadpool(
+            ingest_service.ingest_document, file.filename, file_content
+        )
         
         return {
             "code": 200,
