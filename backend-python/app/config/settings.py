@@ -27,6 +27,11 @@ EMBEDDING_PASSAGE_PREFIX = "passage: "
 # 序列上限不再是问题：e5-large 是 512 token（≈2200 字符），500 字符的 chunk 远未触顶。
 MAX_EMBED_CHARS = 1000
 
+# 分批嵌入的批大小：这个参数**只为让进度可见**（每批结束报一次进度），不改变嵌入结果。
+# 16 片段 × 约 200 ms/片段 ≈ 3 s 一次回调：进度条动得起来，批开销也还不显眼。
+# 调大 → 回调更稀疏（大文档会长时间不动）；调小 → 每批的固定开销占比上升。
+EMBEDDING_BATCH_SIZE = 16
+
 # ---- 切块（按字符计）----
 DEFAULT_CHUNK_SIZE = 800
 DEFAULT_CHUNK_OVERLAP = 120

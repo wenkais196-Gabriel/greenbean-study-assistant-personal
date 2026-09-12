@@ -1,5 +1,5 @@
 ﻿"""
-文档摄取服务：解析 → 实体构建 → 落库 → 切块 → 向量化。
+文档摄取服务：解析 → 实体构建 → 切块 → 嵌入 → 落库。
 
 两种运行模式（沿用上游"渐进式交付"的分阶段思路）：
 
@@ -9,16 +9,26 @@
 - **只解析**：未注入时只解析并构造实体（预览用，不碰数据库）。
 
 ⚠️ 嵌入在 CPU 上不是即时操作（e5-large 实测约 200 ms/片段，290 页资料约 112 s）：
-调用方应把它放进线程池执行，别阻塞事件循环（见 `document_controller`）。
+调用方应把它放进线程池执行，别阻塞事件循环（见 `document_controller` 与 `IngestJobService`）。
+
+⚠️ **嵌入必须发生在任何写库之前**，这是正确性而不是风格问题：SQLite 同一时刻只允许一个写者，
+落库事务一旦写下去，上传任务的进度写（另一个连接）就会撞上 `database is locked`。
+所以流水线是"先算完再写"，进度回调落在无锁的事务之外
+（见 docs/specs/us-stage1-upload-async.md §3.2）。
+
+`on_progress` 是**可选观测点**：上传异步化后，客户端靠它看到"走到哪一步了"。
+不传它，本服务的行为与从前完全一致。
 """
 import os
 import time
+from typing import Callable
 
 from app.config.settings import EMBEDDING_DIMENSION, EMBEDDING_MODEL
 from app.db.orm import SessionFactory
-from app.entities import DocumentRecord, DocumentUnit
+from app.entities import Chunk, DocumentRecord, DocumentUnit
 from app.enums.document_file_type import DocumentFileType
 from app.enums.document_status import DocumentStatus
+from app.enums.ingest_stage import IngestStage
 from app.parsers.parser_factory import ParserFactory
 from app.rag.vector_index_builder import VectorIndexBuilder
 from app.repositories.chunk_repository import ChunkRepository
@@ -37,9 +47,12 @@ SOURCE_TYPE_TO_FILE_TYPE: dict[str, DocumentFileType] = {
     "text": DocumentFileType.TEXT,
 }
 
+ProgressCallback = Callable[[IngestStage, float], None]
+"""`on_progress(阶段, 该阶段完成度 0~1)`；整体进度的加权换算由调用方决定。"""
+
 
 class DocumentIngestService:
-    """安全文档摄取流水线：解析 → 实体构建 → （可选）落库 → 切块 → 向量化。"""
+    """安全文档摄取流水线：解析 → 实体构建 → 切块 → 嵌入 → （可选）落库。"""
 
     def __init__(
         self,
@@ -51,7 +64,7 @@ class DocumentIngestService:
         embedding_dimension: int = EMBEDDING_DIMENSION,
     ) -> None:
         """
-        :param session_factory: 会话工厂；**注入即开启完整摄取**（落库 + 切块 + 向量化），
+        :param session_factory: 会话工厂；**注入即开启完整摄取**（切块 + 嵌入 + 落库），
             不注入则只做解析与实体构建
         :param chunk_service: 切块服务，默认用生产配置的 `ChunkService()`
         :param embedding_service: 嵌入服务，默认懒加载生产配置（**测试请注入假模型**）
@@ -73,6 +86,7 @@ class DocumentIngestService:
         title: str | None = None,
         file_path: str = "",
         file_hash: str | None = None,
+        on_progress: ProgressCallback | None = None,
     ) -> dict:
         """
         贯穿整个文件流的摄取流水线。
@@ -83,13 +97,16 @@ class DocumentIngestService:
         :param title: 文档标题，不传则从文件名推导
         :param file_path: 原始文件在本地 uploads 目录下的路径
         :param file_hash: 原始文件哈希值
+        :param on_progress: 阶段进度回调（可选），供上传进度反馈消费
         :return: 解析结果字典，含 document_record / document_units / chunks_created / elapsed_seconds
         """
         started = time.perf_counter()
 
         # ---- Step 1: 通过工厂匹配解析器并提取 PageIndex 原始单页文本 ----
+        self._report(on_progress, IngestStage.PARSING, 0.0)
         parser = ParserFactory.get_parser(filename)
         parsed_pages = parser.parse(file_content)
+        self._report(on_progress, IngestStage.PARSING, 1.0)
 
         # ---- Step 2: 基于 PageIndex 构造 DocumentRecord ----
         # 从第一页的 metadata 推断文件类型
@@ -141,10 +158,16 @@ class DocumentIngestService:
             document_units.append(unit)
             cumulative_offset += content_len
 
-        # ---- Step 4: 落库 + 切块 + 向量化（仅在注入 session_factory 时执行） ----
+        # ---- Step 4: 切块 → 嵌入 → 落库（仅在注入 session_factory 时执行） ----
+        # 顺序要点：**先算完再写**（见模块 docstring）。没有回调时也就不必分批。
         chunks_created = 0
         if self.session_factory is not None:
-            chunks_created = self._persist(document_record, document_units)
+            chunks = self.chunk_service.split_units(document_units)
+            vectors = self._embed_chunks(chunks, on_progress)
+            self._report(on_progress, IngestStage.PERSISTING, 0.0)
+            self._persist(document_record, document_units, chunks, vectors)
+            self._report(on_progress, IngestStage.PERSISTING, 1.0)
+            chunks_created = len(chunks)
 
         # ---- 构造返回结果 ----
         page_index_preview: list[dict[str, object]] = []
@@ -168,11 +191,43 @@ class DocumentIngestService:
             "elapsed_seconds": round(time.perf_counter() - started, 3),
         }
 
-    def _persist(self, record: DocumentRecord, units: list[DocumentUnit]) -> int:
-        """在同一事务里写入文档、单元、片段与向量，返回写入的片段数。
+    def _embed_chunks(
+        self,
+        chunks: list[Chunk],
+        on_progress: ProgressCallback | None,
+    ) -> list[list[float]]:
+        """在**事务之外**嵌入全部片段，并上报嵌入阶段的进度。
+
+        没有回调就没有"可见性"需求，也就不必分批 —— 直接走批量接口，
+        它与分批路径得到同样的向量（分批不改语义）。
+        """
+        if not chunks:
+            return []
+
+        if on_progress is None:
+            return self._get_embedding_service().embed_texts(
+                [chunk.text_content for chunk in chunks]
+            )
+
+        return self._vector_builder().embed_chunks(
+            chunks,
+            on_progress=lambda processed, total: on_progress(
+                IngestStage.EMBEDDING, processed / total
+            ),
+        )
+
+    def _persist(
+        self,
+        record: DocumentRecord,
+        units: list[DocumentUnit],
+        chunks: list[Chunk],
+        vectors: list[list[float]],
+    ) -> None:
+        """在同一事务里写入文档、单元、片段与向量。
 
         顺序由外键决定：文档 → 单元 → 片段 → 向量（向量再双写到 vec0 索引表）；
         中间两次 `flush` 是为了让下游 INSERT 满足外键约束（`PRAGMA foreign_keys = ON`）。
+        向量在上游已经算好，这里只落库 —— 事务期间不加载模型，锁也就尽快释放。
         """
         with self.session_factory() as session:  # type: ignore[operator]
             DocumentRepository(session).save(record)
@@ -182,21 +237,31 @@ class DocumentIngestService:
                 unit_repository.save(unit)
             session.flush()  # chunks 有 document_unit 外键，必须先落单元
 
-            chunks = self.chunk_service.split_units(units)
             ChunkRepository(session).save_batch(chunks)
             session.flush()  # embedding_vectors 有 chunk 外键
 
             embedding_repository = EmbeddingRepository(
                 session, embedding_dimension=self.embedding_dimension
             )
-            VectorIndexBuilder(
-                self._get_embedding_service(),
-                embedding_model=self.embedding_model,
-            ).build_for_chunks(embedding_repository, chunks)
+            self._vector_builder().write_vectors(embedding_repository, chunks, vectors)
 
             session.commit()
 
-        return len(chunks)
+    @staticmethod
+    def _report(
+        on_progress: ProgressCallback | None,
+        stage: IngestStage,
+        ratio: float,
+    ) -> None:
+        """上报阶段进度；没传回调就什么都不做。"""
+        if on_progress is not None:
+            on_progress(stage, ratio)
+
+    def _vector_builder(self) -> VectorIndexBuilder:
+        return VectorIndexBuilder(
+            self._get_embedding_service(),
+            embedding_model=self.embedding_model,
+        )
 
     def _get_embedding_service(self) -> EmbeddingService:
         """懒加载生产嵌入服务（测试应注入假模型，绝不在这里触发模型下载）。"""

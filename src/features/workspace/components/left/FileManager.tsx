@@ -1,10 +1,22 @@
 /**
  * 文件管理面板 — 文件夹树结构，支持上传、右键重命名/删除/移动
+ *
+ * 上传是**异步**的（见 docs/specs/us-stage1-upload-async.md）：
+ * 提交后先拿受理回执（job_id），再轮询摄取进度；大文档要 1~2 分钟，
+ * 所以面板上要能看到阶段与百分比，而不是一个卡住的界面。
  */
 
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
+import {
+  describeProgress,
+  pollIngestJob,
+  uploadDocument,
+  type IngestJob,
+  type IngestStage,
+  type IngestJobStatus,
+} from "../../../../lib/upload";
 
 /* ------------------------------------------------------------------ */
 /*  类型定义                                                           */
@@ -27,6 +39,18 @@ export interface Folder {
   key: string;
   label: string;
 }
+
+/** 当前这次上传的可视化状态 */
+export interface UploadProgress {
+  fileName: string;
+  status: IngestJobStatus;
+  stage: IngestStage | null;
+  progress: number;
+  error: string | null;
+}
+
+/** 轮询回调只带这几个字段：文件名由发起上传的那次调用补上 */
+type UploadUpdate = Pick<IngestJob, "status" | "stage" | "progress" | "error">;
 
 export interface FileManagerProps {
   files?: FileItem[];
@@ -96,6 +120,7 @@ export default function FileManager({
   const [searchQuery, setSearchQuery] = useState("");
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(["course"]));
   const [internalFiles, setInternalFiles] = useState<FileItem[]>(() => getDefaultFiles(lang));
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
 
   // 右键菜单状态
   const [contextMenu, setContextMenu] = useState<{ fileId: string; x: number; y: number } | null>(null);
@@ -144,23 +169,61 @@ export default function FileManager({
     return file?.category;
   }, [allFiles]);
 
-  /** 上传文件 */
-  const handleUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const newFile: FileItem = {
-        id: uid(),
-        name: file.name,
-        type: (file.name.split('.').pop()?.toUpperCase() as FileType) || "PDF",
-        category: "",
-        size: `${(file.size / 1024 / 1024).toFixed(1)} MB`,
-        date: new Date().toISOString().split('T')[0],
-        status: "pending",
-      };
-      setInternalFiles((prev) => [newFile, ...prev]);
-    }
-    (e.target as HTMLInputElement).value = "";
+  /** 更新某个文件的状态（上传成功后置为已解析） */
+  const setFileStatus = useCallback((fileId: string, status: FileStatus) => {
+    setInternalFiles((prev) =>
+      prev.map((f) => (f.id === fileId ? { ...f, status } : f))
+    );
   }, []);
+
+  /**
+   * 上传文件：提交后先拿受理回执，再轮询进度直到终态。
+   *
+   * 失败时**不清空**条目：让它留在列表里并明确报错，
+   * 用户才知道是哪一份没进去（静默清空是最糟的失败表现）。
+   */
+  const handleUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    (e.target as HTMLInputElement).value = "";
+    if (!file) return;
+
+    const newFile: FileItem = {
+      id: uid(),
+      name: file.name,
+      type: (file.name.split('.').pop()?.toUpperCase() as FileType) || "PDF",
+      category: "",
+      size: `${(file.size / 1024 / 1024).toFixed(1)} MB`,
+      date: new Date().toISOString().split('T')[0],
+      status: "parsing",
+    };
+    setInternalFiles((prev) => [newFile, ...prev]);
+    setUploadProgress({
+      fileName: file.name,
+      status: "queued",
+      stage: null,
+      progress: 0,
+      error: null,
+    });
+
+    const applyUpdate = (update: UploadUpdate) =>
+      setUploadProgress({ fileName: file.name, ...update });
+
+    try {
+      const accepted = await uploadDocument(file);
+      applyUpdate(accepted);
+      const finished = await pollIngestJob(accepted.job_id, { onUpdate: applyUpdate });
+      setFileStatus(newFile.id, finished.status === "succeeded" ? "parsed" : "pending");
+    } catch (error) {
+      setUploadProgress({
+        fileName: file.name,
+        status: "failed",
+        stage: null,
+        progress: 0,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      setFileStatus(newFile.id, "pending");
+    }
+  }, [setFileStatus]);
 
   /** 右键打开菜单 */
   const handleContextMenu = useCallback((e: React.MouseEvent, fileId: string) => {
@@ -272,6 +335,27 @@ export default function FileManager({
           <input type="file" accept=".pdf,.docx,.pptx,.txt,.md,.png,.jpg,.webp" className="hidden" onChange={handleUpload} />
         </label>
       </div>
+
+      {/* 上传进度：受理后就能看到阶段与百分比 */}
+      {uploadProgress && (
+        <div role="status" className="px-4 py-2 border-b border-black/5 space-y-1">
+          <div className="flex items-center justify-between gap-2 text-[10px] text-neutral-500">
+            <span className="truncate" title={uploadProgress.fileName}>{uploadProgress.fileName}</span>
+            <span className="flex-shrink-0 tabular-nums">{Math.round(uploadProgress.progress * 100)}%</span>
+          </div>
+          <div className="h-1 rounded-full bg-black/5 overflow-hidden">
+            <div
+              className={`h-full transition-all duration-300 ${
+                uploadProgress.status === "failed" ? "bg-red-500" : "bg-blue-500"
+              }`}
+              style={{ width: `${Math.round(uploadProgress.progress * 100)}%` }}
+            />
+          </div>
+          <p className={`text-[10px] ${uploadProgress.status === "failed" ? "text-red-600" : "text-neutral-400"}`}>
+            {describeProgress(uploadProgress)}
+          </p>
+        </div>
+      )}
 
       {/* 搜索框 */}
       <div className="px-3 py-2 border-b border-black/5">

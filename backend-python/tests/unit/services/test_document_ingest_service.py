@@ -9,6 +9,9 @@ from app.enums.document_status import DocumentStatus
 from app.entities.document_record import DocumentRecord
 from app.entities.document_unit import DocumentUnit
 
+# 与下面"分批嵌入与进度回调"用例共用的假向量维度
+DIMENSION = 8
+
 
 # ---- 辅助：构造符合真实 parser 契约的 mock 返回值 ----
 
@@ -421,3 +424,203 @@ def test_ingest_service_lazily_builds_and_reuses_embedding_service(monkeypatch):
 
     assert first is second
     assert created == [first]
+
+
+# ========== 分批嵌入与进度回调（上传异步化的观测点） ==========
+
+
+class _BatchEmbeddingModel:
+    """按批返回确定向量；本文件只关心批的划分与回调，不关心向量值。"""
+
+    def __init__(self) -> None:
+        self.batch_sizes: list[int] = []
+
+    def embed(self, texts, batch_size=None):
+        batch = list(texts)
+        self.batch_sizes.append(len(batch))
+        for _ in enumerate(batch):
+            yield [1.0] * DIMENSION
+
+
+def test_ingest_reports_stage_progress_in_order(tmp_path):
+    """阶段回调按 解析 → 嵌入 → 落库 推进，且每阶段的完成度走到 1.0。
+
+    顺序不是随意的：SQLite 只允许一个写者，所以嵌入必须在落库之前完成
+    （见 app/services/document_ingest_service.py 的模块 docstring）。
+    用真 sqlite-vec + 假嵌入模型：验证的是"回调真的接在摄取流水线上"，不是回调函数本身。
+    """
+    from app.db.init_db import initialize_database, load_sqlite_vec_extension
+    from app.db.orm import create_database_engine, create_session_factory
+    from app.enums import IngestStage
+    from app.services.embedding_service import EmbeddingService
+
+    model = _BatchEmbeddingModel()
+    initialization = initialize_database(
+        data_dir=tmp_path / "data",
+        database_name="progress.sqlite3",
+        embedding_dimension=DIMENSION,
+        sqlite_vec_loader=load_sqlite_vec_extension,
+    )
+    engine = create_database_engine(
+        initialization.database_path,
+        sqlite_vec_loader=load_sqlite_vec_extension,
+    )
+    try:
+        service = DocumentIngestService(
+            session_factory=create_session_factory(engine),
+            embedding_service=EmbeddingService(
+                model_name="fake-embedding-model",
+                dimension=DIMENSION,
+                model_factory=lambda name: model,
+                query_prefix="",
+                passage_prefix="",
+            ),
+            embedding_model="fake-embedding-model",
+            embedding_dimension=DIMENSION,
+        )
+
+        with patch("app.parsers.parser_factory.ParserFactory.get_parser") as mock_get_parser:
+            mock_parser = MagicMock()
+            mock_parser.parse.return_value = [
+                _make_page(page_number=1, content="premier paragraphe"),
+                _make_page(page_number=2, content="deuxieme paragraphe"),
+            ]
+            mock_get_parser.return_value = mock_parser
+
+            events: list[tuple[IngestStage, float]] = []
+            service.ingest_document(
+                "test.pdf",
+                b"content",
+                on_progress=lambda stage, ratio: events.append((stage, ratio)),
+            )
+    finally:
+        engine.dispose()
+
+    stages = [stage for stage, _ in events]
+    assert stages == [
+        IngestStage.PARSING,
+        IngestStage.PARSING,
+        IngestStage.EMBEDDING,
+        IngestStage.PERSISTING,
+        IngestStage.PERSISTING,
+    ], "阶段顺序必须如实反映流水线：先算完（含嵌入）再落库"
+    assert events[-1] == (IngestStage.PERSISTING, 1.0)
+    assert model.batch_sizes == [2], "两个片段一批就够（默认批大小 16）"
+    for stage in (IngestStage.PARSING, IngestStage.EMBEDDING, IngestStage.PERSISTING):
+        ratios = [ratio for event_stage, ratio in events if event_stage is stage]
+        assert ratios == sorted(ratios), f"{stage} 阶段内的完成度不能回退"
+
+
+def test_ingest_without_progress_callback_embeds_in_one_batch(tmp_path):
+    """不传回调时不分批：分批只是为了进度可见，没有观测者就没有必要。"""
+    from app.db.init_db import initialize_database, load_sqlite_vec_extension
+    from app.db.orm import create_database_engine, create_session_factory
+    from app.services.embedding_service import EmbeddingService
+
+    model = _BatchEmbeddingModel()
+    initialization = initialize_database(
+        data_dir=tmp_path / "data",
+        database_name="no-progress.sqlite3",
+        embedding_dimension=DIMENSION,
+        sqlite_vec_loader=load_sqlite_vec_extension,
+    )
+    engine = create_database_engine(
+        initialization.database_path,
+        sqlite_vec_loader=load_sqlite_vec_extension,
+    )
+    try:
+        service = DocumentIngestService(
+            session_factory=create_session_factory(engine),
+            embedding_service=EmbeddingService(
+                model_name="fake-embedding-model",
+                dimension=DIMENSION,
+                model_factory=lambda name: model,
+                query_prefix="",
+                passage_prefix="",
+            ),
+            embedding_model="fake-embedding-model",
+            embedding_dimension=DIMENSION,
+        )
+
+        with patch("app.parsers.parser_factory.ParserFactory.get_parser") as mock_get_parser:
+            mock_parser = MagicMock()
+            mock_parser.parse.return_value = [
+                _make_page(page_number=1, content="premier paragraphe"),
+                _make_page(page_number=2, content="deuxieme paragraphe"),
+            ]
+            mock_get_parser.return_value = mock_parser
+
+            result = service.ingest_document("test.pdf", b"content")
+    finally:
+        engine.dispose()
+
+    assert model.batch_sizes == [2], "没有回调时走一次性批量接口"
+    assert result["chunks_created"] == 2
+
+
+def test_parse_only_mode_reports_only_parsing():
+    """不注入 session_factory 时是"只解析"模式：不该出现落库/嵌入阶段。"""
+    from app.enums import IngestStage
+
+    service = DocumentIngestService()
+
+    with patch("app.parsers.parser_factory.ParserFactory.get_parser") as mock_get_parser:
+        mock_parser = MagicMock()
+        mock_parser.parse.return_value = [_make_page(page_number=1, content="texte")]
+        mock_get_parser.return_value = mock_parser
+
+        events: list[tuple[IngestStage, float]] = []
+        service.ingest_document(
+            "test.pdf",
+            b"content",
+            on_progress=lambda stage, ratio: events.append((stage, ratio)),
+        )
+
+    assert [stage for stage, _ in events] == [IngestStage.PARSING, IngestStage.PARSING]
+
+
+def test_ingest_of_a_document_with_no_pages_persists_nothing(tmp_path):
+    """解析出 0 页的文档：没有片段可嵌入，摄取也不该因为空列表报错。"""
+    from app.db.init_db import initialize_database, load_sqlite_vec_extension
+    from app.db.orm import create_database_engine, create_session_factory
+    from app.services.embedding_service import EmbeddingService
+
+    model = _BatchEmbeddingModel()
+    initialization = initialize_database(
+        data_dir=tmp_path / "data",
+        database_name="no-pages.sqlite3",
+        embedding_dimension=DIMENSION,
+        sqlite_vec_loader=load_sqlite_vec_extension,
+    )
+    engine = create_database_engine(
+        initialization.database_path,
+        sqlite_vec_loader=load_sqlite_vec_extension,
+    )
+    try:
+        service = DocumentIngestService(
+            session_factory=create_session_factory(engine),
+            embedding_service=EmbeddingService(
+                model_name="fake-embedding-model",
+                dimension=DIMENSION,
+                model_factory=lambda name: model,
+                query_prefix="",
+                passage_prefix="",
+            ),
+            embedding_model="fake-embedding-model",
+            embedding_dimension=DIMENSION,
+        )
+
+        with patch("app.parsers.parser_factory.ParserFactory.get_parser") as mock_get_parser:
+            mock_parser = MagicMock()
+            mock_parser.parse.return_value = []
+            mock_get_parser.return_value = mock_parser
+
+            result = service.ingest_document(
+                "empty.pdf", b"content", on_progress=lambda stage, ratio: None
+            )
+    finally:
+        engine.dispose()
+
+    assert result["total_pages"] == 0
+    assert result["chunks_created"] == 0
+    assert model.batch_sizes == [], "没有片段就不该调用模型"

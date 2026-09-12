@@ -247,6 +247,19 @@ def _create_schema(connection: sqlite3.Connection, embedding_dimension: int) -> 
             updated_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS ingest_jobs (
+            id TEXT PRIMARY KEY,
+            filename TEXT NOT NULL,
+            workspace_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            stage TEXT,
+            progress REAL NOT NULL DEFAULT 0,
+            error TEXT,
+            result_json TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS app_metadata (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL

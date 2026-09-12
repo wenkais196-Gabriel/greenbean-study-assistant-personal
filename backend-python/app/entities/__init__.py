@@ -4,6 +4,7 @@ from app.entities.chat_session import ChatSession
 from app.entities.chunk import Chunk
 from app.entities.document_record import DocumentRecord
 from app.entities.document_unit import DocumentUnit
+from app.entities.ingest_job import IngestJob
 from app.entities.provider_config import ProviderConfig
 from app.entities.section import Section
 from app.entities.section_unit_link import SectionUnitLink
@@ -16,6 +17,7 @@ __all__ = [
     "Chunk",
     "DocumentRecord",
     "DocumentUnit",
+    "IngestJob",
     "ProviderConfig",
     "Section",
     "SectionUnitLink",

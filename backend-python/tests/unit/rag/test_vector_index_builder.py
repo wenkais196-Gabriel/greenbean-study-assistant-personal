@@ -46,7 +46,7 @@ def make_chunk(chunk_id: str, text: str) -> Chunk:
     )
 
 
-def make_builder(model=None):
+def make_builder(model=None, batch_size=None):
     """前缀固定为空：本文件测的是编排与双写顺序，前缀由 embedding_service 的用例覆盖。"""
     model = FakeEmbeddingModel() if model is None else model
     service = EmbeddingService(
@@ -55,7 +55,9 @@ def make_builder(model=None):
         query_prefix="",
         passage_prefix="",
     )
-    return VectorIndexBuilder(service, embedding_model=MODEL_NAME), model
+    if batch_size is None:
+        return VectorIndexBuilder(service, embedding_model=MODEL_NAME), model
+    return VectorIndexBuilder(service, embedding_model=MODEL_NAME, batch_size=batch_size), model
 
 
 def test_build_writes_embedding_and_index_for_each_chunk():
@@ -129,3 +131,75 @@ def test_build_with_empty_chunk_list_returns_zero_without_loading_model():
     assert model.received == []
     assert repository.embeddings == []
     assert repository.index == []
+
+
+# ========== 分批嵌入与进度回调（AC7 / AC8） ==========
+
+
+class ContentAddressedModel:
+    """向量只由文本自身决定 —— 这样"分批"与"整批"必须得到同样的结果。"""
+
+    def embed(self, texts, batch_size=None):
+        for text in list(texts):
+            yield [float(len(text))] * DIMENSION
+
+
+def make_content_addressed_builder(batch_size: int) -> VectorIndexBuilder:
+    service = EmbeddingService(
+        dimension=DIMENSION,
+        model_factory=lambda name: ContentAddressedModel(),
+        query_prefix="",
+        passage_prefix="",
+    )
+    return VectorIndexBuilder(service, embedding_model=MODEL_NAME, batch_size=batch_size)
+
+
+def test_build_reports_progress_after_each_batch():
+    builder, model = make_builder(batch_size=10)
+    repository = FakeEmbeddingRepository()
+    chunks = [make_chunk(f"c{index}", f"texte {index}") for index in range(27)]
+    calls: list[tuple[int, int]] = []
+
+    count = builder.build_for_chunks(
+        repository,
+        chunks,
+        on_progress=lambda processed, total: calls.append((processed, total)),
+    )
+
+    assert count == 27
+    assert calls == [(10, 27), (20, 27), (27, 27)], "每批结束都要报一次，最后一次必须是全量"
+    assert len(model.received) == 3, "批数应与回调次数一致"
+    assert [row[0] for row in repository.embeddings] == [chunk.id for chunk in chunks]
+
+
+def test_build_without_progress_callback_indexes_every_chunk():
+    """回调是可选观测点：不传它，行为必须与从前一致。"""
+    builder, _ = make_builder(batch_size=10)
+    repository = FakeEmbeddingRepository()
+    chunks = [make_chunk(f"c{index}", f"texte {index}") for index in range(27)]
+
+    count = builder.build_for_chunks(repository, chunks)
+
+    assert count == 27
+    assert len(repository.embeddings) == 27
+    assert len(repository.index) == 27
+
+
+def test_batching_does_not_change_the_vectors():
+    """分批只是加观测点，不改语义：同一文本在不同批大小下必须得到同一向量。"""
+
+    def build_with(batch_size: int) -> dict[str, list[float]]:
+        repository = FakeEmbeddingRepository()
+        chunks = [make_chunk(f"c{index}", f"texte {index}") for index in range(7)]
+        make_content_addressed_builder(batch_size).build_for_chunks(repository, chunks)
+        return {chunk_id: vector for chunk_id, _, vector in repository.embeddings}
+
+    assert build_with(100) == build_with(3)
+
+
+def test_embed_chunks_with_empty_list_returns_empty_without_loading_model():
+    """空片段列表不该加载模型（上传解析不出内容的文件时会走到这里）。"""
+    builder, model = make_builder(batch_size=10)
+
+    assert builder.embed_chunks([]) == []
+    assert model.received == []

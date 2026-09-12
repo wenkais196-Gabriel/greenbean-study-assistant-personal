@@ -181,3 +181,65 @@ def test_reinitializing_with_a_different_embedding_dimension_fails_with_clear_er
             sqlite_vec_loader=load_test_sqlite_vec,
             embedding_dimension=16,
         )
+
+
+def _table_names(database_path) -> set[str]:
+    with closing(sqlite3.connect(database_path)) as connection:
+        return {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+
+
+def test_ingest_jobs_table_is_created_for_a_fresh_database(tmp_path):
+    """上传异步化新增的任务表（见 docs/specs/us-stage1-upload-async.md §4）。"""
+    result = initialize_database(
+        data_dir=tmp_path / "data",
+        sqlite_vec_loader=load_test_sqlite_vec,
+        embedding_dimension=8,
+    )
+
+    assert "ingest_jobs" in _table_names(result.database_path)
+
+
+def test_ingest_jobs_table_is_added_to_an_existing_database(tmp_path):
+    """AC11：旧库（还没有上传任务这个概念）重启后要自动补表，且既有数据分毫不动。"""
+    data_dir = tmp_path / "data"
+    initialize_database(
+        data_dir=data_dir,
+        sqlite_vec_loader=load_test_sqlite_vec,
+        embedding_dimension=8,
+    )
+    database_path = data_dir / "greenbean-study-assistant.sqlite3"
+
+    engine = create_database_engine(database_path, sqlite_vec_loader=load_test_sqlite_vec)
+    try:
+        with create_session_factory(engine)() as session:
+            DocumentRepository(session).save(
+                DocumentRecord(
+                    workspace_id="ws-1",
+                    title="cours",
+                    original_filename="cours.pdf",
+                    file_type=DocumentFileType.PDF,
+                    file_path="",
+                )
+            )
+            session.commit()
+    finally:
+        engine.dispose()
+
+    with closing(sqlite3.connect(database_path)) as connection:
+        connection.execute("DROP TABLE ingest_jobs")
+        connection.commit()
+
+    initialize_database(
+        data_dir=data_dir,
+        sqlite_vec_loader=load_test_sqlite_vec,
+        embedding_dimension=8,
+    )
+
+    assert "ingest_jobs" in _table_names(database_path)
+    with closing(sqlite3.connect(database_path)) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM document_records").fetchone()[0] == 1

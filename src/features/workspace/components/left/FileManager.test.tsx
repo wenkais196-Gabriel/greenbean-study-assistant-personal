@@ -1,11 +1,51 @@
 import React from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
 import FileManager, { type FileItem, type Folder } from "./FileManager";
+import { pollIngestJob, uploadDocument, type IngestJob } from "../../../../lib/upload";
+
+/**
+ * 上传走真实网络（见 src/lib/upload.ts），测试里把这两个调用换掉；
+ * `describeProgress` 等纯函数保留真实实现 —— UI 文案正是要验证的部分。
+ */
+vi.mock("../../../../lib/upload", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../../lib/upload")>();
+  return { ...actual, uploadDocument: vi.fn(), pollIngestJob: vi.fn() };
+});
+
+const uploadDocumentMock = vi.mocked(uploadDocument);
+const pollIngestJobMock = vi.mocked(pollIngestJob);
+
+function makeJob(overrides: Partial<IngestJob> = {}): IngestJob {
+  return {
+    job_id: "job-1",
+    filename: "cours-fr.pdf",
+    status: "queued",
+    stage: null,
+    progress: 0,
+    error: null,
+    result: null,
+    ...overrides,
+  };
+}
+
+/** 通过隐藏的 file input 触发一次上传 */
+function uploadFile(file: File) {
+  const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+  Object.defineProperty(fileInput, "files", { value: [file], configurable: true });
+  fireEvent.change(fileInput);
+}
+
+function makeCourseFile() {
+  return new File(["dummy content"], "cours-fr.pdf", { type: "application/pdf" });
+}
 
 describe("FileManager", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // 默认：受理成功、随后立刻完成 —— 覆盖大多数用例，个别用例再各自覆盖
+    uploadDocumentMock.mockResolvedValue(makeJob({ status: "queued" }));
+    pollIngestJobMock.mockResolvedValue(makeJob({ status: "succeeded", progress: 1 }));
   });
 
   afterEach(() => {
@@ -105,7 +145,8 @@ describe("FileManager", () => {
     const file = new File(["dummy content"], "nouveau-cours.pdf", { type: "application/pdf" });
     Object.defineProperty(fileInput, "files", { value: [file] });
     fireEvent.change(fileInput);
-    expect(screen.getByText("nouveau-cours.pdf")).toBeDefined();
+    // 文件名会出现在两处：上传进度区与文件列表条目
+    expect(screen.getAllByText("nouveau-cours.pdf")).toHaveLength(2);
   });
 
   it("上传空文件列表不会报错", () => {
@@ -117,6 +158,63 @@ describe("FileManager", () => {
     fireEvent.change(fileInput);
     // 不应有额外文件出现
     expect(screen.getByText("cours-analyse-s1.pdf")).toBeDefined();
+  });
+
+  /* ===== 上传：异步受理 + 进度反馈（docs/specs/us-stage1-upload-async.md AC10） ===== */
+
+  it("上传后展示当前阶段与百分比", async () => {
+    pollIngestJobMock.mockImplementation((_jobId, options) => {
+      options?.onUpdate?.(makeJob({ status: "running", stage: "embedding", progress: 0.5 }));
+      return new Promise<never>(() => {}); // 挂住：只验证中间态
+    });
+
+    render(<FileManager />);
+    uploadFile(makeCourseFile());
+
+    const status = await screen.findByRole("status");
+    expect(status.textContent).toContain("cours-fr.pdf");
+    expect(status.textContent).toContain("正在向量化片段");
+    expect(status.textContent).toContain("50%");
+  });
+
+  it("解析完成后展示完成文案与 100%", async () => {
+    pollIngestJobMock.mockImplementation(async (_jobId, options) => {
+      const finished = makeJob({ status: "succeeded", stage: "persisting", progress: 1 });
+      options?.onUpdate?.(finished);
+      return finished;
+    });
+
+    render(<FileManager />);
+    uploadFile(makeCourseFile());
+
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toContain("解析完成")
+    );
+    expect(screen.getByRole("status").textContent).toContain("100%");
+  });
+
+  it("摄取失败时展示失败原因，而不是静默消失", async () => {
+    pollIngestJobMock.mockImplementation(async (_jobId, options) => {
+      const failed = makeJob({ status: "failed", error: "ValueError: 解析器无法解析该文件" });
+      options?.onUpdate?.(failed);
+      return failed;
+    });
+
+    render(<FileManager />);
+    uploadFile(makeCourseFile());
+
+    expect(await screen.findByText(/解析失败：ValueError/)).toBeDefined();
+    // 文件条目保留在列表里（进度区也会显示文件名），用户才知道是哪一份没进去
+    expect(screen.getAllByText("cours-fr.pdf")).toHaveLength(2);
+  });
+
+  it("受理请求被拒时展示后端给出的原因", async () => {
+    uploadDocumentMock.mockRejectedValue(new Error("暂不支持 .ppt 格式"));
+
+    render(<FileManager />);
+    uploadFile(new File(["x"], "slides.ppt"));
+
+    expect(await screen.findByText(/暂不支持 .ppt 格式/)).toBeDefined();
   });
 
   /* ===== 上传按钮 ===== */
