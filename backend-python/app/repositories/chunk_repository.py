@@ -33,6 +33,12 @@ class ChunkRepository:
         )
         return chunk
 
+    def save_batch(self, chunks: list[Chunk]) -> list[Chunk]:
+        """批量保存 Chunk；调用方负责 commit。返回保存后的列表。"""
+        for chunk in chunks:
+            self.save(chunk)
+        return chunks
+
     def get_by_id(self, chunk_id: str) -> Chunk | None:
         model = self.session.get(ChunkModel, chunk_id)
         if model is None:
