@@ -1,6 +1,7 @@
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
+import re
 import sqlite3
 from typing import Callable
 
@@ -65,6 +66,38 @@ def initialize_database(
         persistence_ready=True,
         sqlite_vec_version=sqlite_vec_version,
     )
+
+
+# 从 vec0 的建表 SQL 里取维度，形如：embedding float[1024]
+_VEC0_DIMENSION_PATTERN = re.compile(r"embedding\s+float\[(\d+)\]", re.IGNORECASE)
+
+
+def _ensure_vector_index(connection: sqlite3.Connection, embedding_dimension: int) -> None:
+    """建向量索引表；若已存在但**维度与当前配置不一致**，抛明确错误。
+
+    vec0 的维度在建表时固定、不能原地改，而换 embedding 模型会改变维度。
+    这里选择"早失败 + 说清怎么修"，而不是让后续写入抛出难懂的底层错误：
+    `embedding_index` 是可以从 `embedding_vectors` 重建的副本，重建后重跑嵌入即可。
+    """
+    connection.execute(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS embedding_index USING vec0("
+        f"chunk_id TEXT PRIMARY KEY, embedding float[{int(embedding_dimension)}])"
+    )
+
+    row = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'embedding_index'"
+    ).fetchone()
+    match = _VEC0_DIMENSION_PATTERN.search(row[0]) if row and row[0] else None
+    if match is None:
+        return
+
+    existing = int(match.group(1))
+    if existing != int(embedding_dimension):
+        raise SQLiteVecInitializationError(
+            f"向量索引已按 {existing} 维建立，与当前配置的 {int(embedding_dimension)} 维不一致："
+            "换了 embedding 模型就必须重建索引 —— 删除 embedding_index 后重新初始化，"
+            "并重新为全部 chunk 生成向量（embedding_vectors 是权威数据，索引可据此重建）"
+        )
 
 
 def _check_sqlite_vec(connection: sqlite3.Connection) -> str:
@@ -224,10 +257,7 @@ def _create_schema(connection: sqlite3.Connection, embedding_dimension: int) -> 
     # ⚠️ 维度在建表时固定，sqlite-vec 不支持就地改维度：换 embedding 模型必须重建该表。
     # 它会创建若干伴生表（embedding_index_info / _chunks / _rowids / _vector_chunks00），
     # 这是 sqlite-vec 的正常行为。
-    connection.execute(
-        "CREATE VIRTUAL TABLE IF NOT EXISTS embedding_index USING vec0("
-        f"chunk_id TEXT PRIMARY KEY, embedding float[{int(embedding_dimension)}])"
-    )
+    _ensure_vector_index(connection, embedding_dimension)
     connection.execute(
         """
         INSERT INTO app_metadata(key, value)

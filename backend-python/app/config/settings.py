@@ -10,12 +10,21 @@ DATA_DIR = "data"
 DATABASE_NAME = "greenbean-study-assistant.sqlite3"
 
 # ---- 向量化 ----
-EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-EMBEDDING_DIMENSION = 384
+# 模型选型（2026-09-12 由 MiniLM-L12-v2 换为 e5-large，依据 docs/retrieval-diagnosis.md §3.7 的对照）：
+# - 命中率：中文 @5 50% → 66.7%、@20 91.7% → 100%；法语 @5（同语言基线）50% → 83.3%
+# - 序列上限：512 token（MiniLM 只有 128，会截断 39.5% 的片段 —— 换模型即消除该张力）
+# - 代价（本机 CPU 实测）：模型 0.22 GB → 2.2 GB；query 嵌入 P50 4 ms → 30 ms（每次问答都付）；
+#   408 个片段建索引 7 s → 112 s（一次性成本，上传后需给用户进度反馈）
+EMBEDDING_MODEL = "intfloat/multilingual-e5-large"
+EMBEDDING_DIMENSION = 1024
+
+# e5 系列要求给 query / passage 加前缀，否则效果明显低于其应有水平（见 §3.7 的实验口径）。
+# 前缀在**送模型前**拼接，不写进 chunk 存储文本；换成不需要前缀的模型时置空即可。
+EMBEDDING_QUERY_PREFIX = "query: "
+EMBEDDING_PASSAGE_PREFIX = "passage: "
 
 # 嵌入输入的字符上限：只为拦住异常超长文本，正常 chunk（DEFAULT_CHUNK_SIZE）不会被动到。
-# ⚠️ 注意：模型自身还有 128 token 的序列上限，与 DEFAULT_CHUNK_SIZE 存在张力，
-# 详见 docs/specs/us-stage1-embedding.md §12 —— 该问题要靠评测用数据解决，不能靠这里截断。
+# 序列上限不再是问题：e5-large 是 512 token（≈2200 字符），500 字符的 chunk 远未触顶。
 MAX_EMBED_CHARS = 1000
 
 # ---- 切块（按字符计）----

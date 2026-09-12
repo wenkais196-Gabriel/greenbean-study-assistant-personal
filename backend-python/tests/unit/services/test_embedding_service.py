@@ -38,13 +38,23 @@ class RecordingModelFactory:
         return self.model
 
 
-def make_service(model=None, *, dimension: int = DIMENSION, max_chars: int = 1000):
+def make_service(
+    model=None,
+    *,
+    dimension: int = DIMENSION,
+    max_chars: int = 1000,
+    query_prefix: str = "",
+    passage_prefix: str = "",
+):
+    """默认前缀为空；生产默认值（e5 的 `query: ` / `passage: `）由专门的用例覆盖。"""
     model = FakeEmbeddingModel() if model is None else model
     factory = RecordingModelFactory(model)
     service = EmbeddingService(
         dimension=dimension,
         max_chars=max_chars,
         model_factory=factory,
+        query_prefix=query_prefix,
+        passage_prefix=passage_prefix,
     )
     return service, model, factory
 
@@ -129,3 +139,29 @@ def test_mismatched_vector_count_raises():
 
     with pytest.raises(ValueError):
         service.embed_texts(["a", "b"])
+
+
+def test_query_and_passage_prefixes_are_applied_before_embedding():
+    """e5 系列要求 query / passage 用不同前缀 —— 前缀只能在送模型前拼，不写进存储文本。"""
+    service, model, _ = make_service(query_prefix="query: ", passage_prefix="passage: ")
+
+    service.embed_texts(["texte indexé"])
+    service.embed_query("question posée")
+
+    assert model.received == [["passage: texte indexé"], ["query: question posée"]]
+
+
+def test_prefixes_are_empty_by_default_in_tests():
+    """不传前缀时行为与从前一致（保证既有断言的语义不变）。"""
+    service, model, _ = make_service()
+
+    service.embed_texts(["texte"])
+
+    assert model.received == [["texte"]]
+
+
+def test_empty_text_list_skips_model_even_with_prefixes():
+    service, _, factory = make_service(query_prefix="query: ", passage_prefix="passage: ")
+
+    assert service.embed_texts([]) == []
+    assert factory.calls == 0

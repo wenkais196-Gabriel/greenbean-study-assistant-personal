@@ -47,8 +47,14 @@ def make_chunk(chunk_id: str, text: str) -> Chunk:
 
 
 def make_builder(model=None):
+    """前缀固定为空：本文件测的是编排与双写顺序，前缀由 embedding_service 的用例覆盖。"""
     model = FakeEmbeddingModel() if model is None else model
-    service = EmbeddingService(dimension=DIMENSION, model_factory=lambda name: model)
+    service = EmbeddingService(
+        dimension=DIMENSION,
+        model_factory=lambda name: model,
+        query_prefix="",
+        passage_prefix="",
+    )
     return VectorIndexBuilder(service, embedding_model=MODEL_NAME), model
 
 
@@ -93,6 +99,24 @@ def test_build_embeds_all_chunk_texts_in_one_batch():
     )
 
     assert model.received == [["alpha", "beta"]]
+
+
+def test_build_applies_passage_prefix_configured_on_the_service():
+    """生产链路给待索引文本加 passage 前缀（e5 要求），且前缀不写进 chunk 存储文本。"""
+    model = FakeEmbeddingModel()
+    service = EmbeddingService(
+        dimension=DIMENSION,
+        model_factory=lambda name: model,
+        query_prefix="query: ",
+        passage_prefix="passage: ",
+    )
+    builder = VectorIndexBuilder(service, embedding_model=MODEL_NAME)
+    chunk = make_chunk("c1", "alpha")
+
+    builder.build_for_chunks(FakeEmbeddingRepository(), [chunk])
+
+    assert model.received == [["passage: alpha"]]
+    assert chunk.text_content == "alpha"
 
 
 def test_build_with_empty_chunk_list_returns_zero_without_loading_model():

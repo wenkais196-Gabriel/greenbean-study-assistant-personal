@@ -164,3 +164,20 @@ def test_sqlite_vec_health_check_rejects_empty_version(tmp_path):
             sqlite_vec_loader=load_empty_version,
             embedding_dimension=8,
         )
+
+
+def test_reinitializing_with_a_different_embedding_dimension_fails_with_clear_error(tmp_path):
+    """换了 embedding 模型（维度变了）时必须早失败：vec0 的维度不能原地改。"""
+    data_dir = tmp_path / "data"
+    initialize_database(
+        data_dir=data_dir,
+        sqlite_vec_loader=load_test_sqlite_vec,
+        embedding_dimension=8,
+    )
+
+    with pytest.raises(SQLiteVecInitializationError, match="重建索引"):
+        initialize_database(
+            data_dir=data_dir,
+            sqlite_vec_loader=load_test_sqlite_vec,
+            embedding_dimension=16,
+        )

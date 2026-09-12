@@ -140,33 +140,6 @@ def needs_e5_prefix(model_name: str) -> bool:
     return "e5" in model_name.lower()
 
 
-class PrefixedEmbeddingService:
-    """给输入加 e5 前缀的一层包装。
-
-    只影响送给模型的文本，**不改 chunk 存储文本、也不动生产代码**：
-    MiniLM 不需要前缀，而生产链路没有前缀概念，所以这层只存在于对照实验里。
-    """
-
-    def __init__(
-        self,
-        inner: EmbeddingService,
-        *,
-        query_prefix: str,
-        passage_prefix: str,
-    ) -> None:
-        self.inner = inner
-        self.query_prefix = query_prefix
-        self.passage_prefix = passage_prefix
-
-    def embed_texts(self, texts: list[str]) -> list[list[float]]:
-        if not texts:
-            return []
-        return self.inner.embed_texts([self.passage_prefix + text for text in texts])
-
-    def embed_query(self, text: str) -> list[float]:
-        return self.inner.embed_query(self.query_prefix + text)
-
-
 def parse_documents(docs_dir: Path) -> list[tuple[str, list[dict]]]:
     """用 PyMuPDF **原样**提取页面文本，作为「未修复污染」的对照基线。
 
@@ -504,24 +477,20 @@ def main() -> None:
     print(f"  语料字符数：{sum(len(t) for t in raw_texts)}（{len(raw_texts)} 个 chunk）")
     print(f"  重音拆裂修复处数：{repaired_count}（按页面文本统计，不含 chunk overlap 重复）")
 
-    base_service = EmbeddingService(
+    # 直接复用**生产** EmbeddingService（含其 query/passage 前缀能力），不另起一份实现
+    use_prefix = needs_e5_prefix(args.embedding_model)
+    embedding_service = EmbeddingService(
         model_name=args.embedding_model,
         dimension=dimension,
         model_factory=lambda name: TextEmbedding(name, cache_dir=args.cache_dir),
+        query_prefix="query: " if use_prefix else "",
+        passage_prefix="passage: " if use_prefix else "",
     )
-    base_service.embed_texts(["warmup"])  # 触发模型加载，让后续耗时只计推理
-    tokenizer = base_service._get_model().model.tokenizer  # type: ignore[attr-defined]
+    embedding_service.embed_texts(["warmup"])  # 触发模型加载，让后续耗时只计推理
+    tokenizer = embedding_service._get_model().model.tokenizer  # type: ignore[attr-defined]
     # 序列上限必须从 tokenizer 读：MiniLM 是 128，e5-large 更大 —— 硬编码会误判截断比例
     max_tokens = _truncation_max_length(tokenizer.truncation) or FALLBACK_MAX_TOKENS
     print(f"  tokenizer 序列上限：{max_tokens} token")
-
-    embedding_service: EmbeddingService | PrefixedEmbeddingService
-    if needs_e5_prefix(args.embedding_model):
-        embedding_service = PrefixedEmbeddingService(
-            base_service, query_prefix="query: ", passage_prefix="passage: "
-        )
-    else:
-        embedding_service = base_service
 
     token_counts = {
         "raw": token_lengths(tokenizer, raw_texts),

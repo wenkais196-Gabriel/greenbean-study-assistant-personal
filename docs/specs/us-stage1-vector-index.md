@@ -188,7 +188,8 @@ Feature: 本地向量索引（sqlite-vec + vec0）
 
 - **A1**：vec0 建表语法 `vec0(chunk_id text primary key, embedding float[N])` —— **已实测通过**（含 KNN 查询）。
 - **A2**：维度来源为 `initialize_database(embedding_dimension=...)`，`app_metadata` 表已存该值；本批**不引入**新的配置来源。
-- **A3**：**向量存两份**（`embedding_vectors.vector_json` 权威 + `embedding_index` 索引副本）。理由是保留元数据与既有约束，代价是存储翻倍 —— **384 维 float32 ≈ 1.5 KB/chunk，10 万个 chunk 约 150 MB**，可接受。**若你认为该省这份空间，请指出**（替代方案是让 vec0 只存 id+向量，元数据只留一处）。
+  2026-09-12 补：若 `embedding_index` 已按别的维度建过，`initialize_database` 会**明确报错**（换 embedding 模型必须重建索引），而不是让写入阶段抛出难懂的底层错误。
+- **A3**：**向量存两份**（`embedding_vectors.vector_json` 权威 + `embedding_index` 索引副本）。理由是保留元数据与既有约束，代价是存储翻倍 —— **384 维 float32 ≈ 1.5 KB/chunk**；2026-09-12 切到 1024 维的 e5-large 后 **≈ 4 KB/chunk，10 万个 chunk 约 400 MB**，仍可接受。**若你认为该省这份空间，请指出**（替代方案是让 vec0 只存 id+向量，元数据只留一处）。
 - **A4**：距离度量用 `vec0` 默认（**非平方 L2 / 欧氏距离**，2026-09-12 更正，原写成「平方 L2」）。若日后要换 cosine，需要在写入前归一化向量 —— **本批不做**，但会在代码注释里写明。
 - **A5**：本批**不引入 fastembed**（不需要模型），因此测试可以真跑 sqlite-vec 而不必 mock。
 

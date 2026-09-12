@@ -1,8 +1,9 @@
 # US · 阶段 1 第三批：把片段向量化并写入本地索引
 
 > **状态：已确认（含"文本截断"，2026-09-12）**
-> 附注（2026-09-12 模型对照）：`multilingual-e5-large` 的序列上限是 **512**（MiniLM 是 128），
-> 换模型即可消除截断问题；对照数据见 [`retrieval-diagnosis.md`](../retrieval-diagnosis.md) §3.7。 —— Gate 1 通过，进入 Gate 2（先写测试）
+> 附注（2026-09-12 模型对照并落地）：`multilingual-e5-large` 的序列上限是 **512**（MiniLM 是 128），
+> 换模型即消除了截断问题；对照与延迟数据见 [`retrieval-diagnosis.md`](../retrieval-diagnosis.md) §3.7，
+> 生产切换见 §9 的 A3 / A7。 —— Gate 1 通过，进入 Gate 2（先写测试）
 > 依据：[`planning/08`](../../planning/08-技术选型决策记录.md) §2.2（fastembed 选型）、[`planning/06`](../../planning/06-代码现状全景.md) §4（断点 ⑥）、上游 spec §4.4
 > 前置：第二批已完成（`embedding_index` vec0 表可用、`save_to_index` / `search_similar` 已就绪）
 > 流程：本文档（✅ 确认）→ Gate 2（先写测试，确认 Red）→ **你确认** → Gate 3（最小实现）
@@ -194,7 +195,15 @@ Feature: 向量化与索引构建
 - **A1**：`EmbeddingService` 通过**可注入的 model factory** 获取模型（默认 `fastembed.TextEmbedding`），
   这样测试注入假模型即可，**不需要 mock 库本身**，也不需要网络。
 - **A2**：模型采用**懒加载**（首次调用嵌入时才构造）；构造与推理的耗时都会计入第四批的性能基线。
-- **A3**：模型名固定为 `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`，维度 384（`08` §2.2 已定）。
+- **A3**：模型 **2026-09-12 由 `paraphrase-multilingual-MiniLM-L12-v2`（384 维）换为
+  `intfloat/multilingual-e5-large`（1024 维）**，依据 [`retrieval-diagnosis.md`](../retrieval-diagnosis.md) §3.7 的对照
+  （中文 @20 91.7% → **100%**、法语 @5 50% → **83.3%**）。
+  代价（本机 CPU 实测）：模型 0.22 GB → 2.2 GB、query 嵌入 P50 4 ms → 30 ms、408 片段建索引 7 s → 112 s。
+  ⚠️ 换模型会改维度，而 vec0 表的维度**建表时固定** ⇒ 必须重建索引；`initialize_database` 已加「维度不一致即报错」。
+- **A7**（2026-09-12 新增）：e5 系列要求 **query / passage 前缀**（`query: ` / `passage: `），
+  由 `settings.EMBEDDING_QUERY_PREFIX` / `EMBEDDING_PASSAGE_PREFIX` 配置；前缀在**送模型前**拼接，
+  **不写进 chunk 存储文本**。因此配置了不同前缀时，`embed_query` 与 `embed_texts` 对同一文本的结果
+  **有意不同**（这是模型契约，不是接口不一致）。
 - **A4**：`MAX_EMBED_CHARS` 默认 **1000 字符** —— 比 `chunk_size`（800）略大，**保证正常 chunk 不会被动到**，
   只为拦住异常超长输入。见 §12 的已知张力。
 - **A5**：向量以 `vector_json`（权威表）与 vec0（索引）**双写**（第二批已确认的决策）。
