@@ -397,3 +397,27 @@ def test_ingest_first_page_no_metadata_falls_back_to_other():
         result = service.ingest_document("test.pdf", b"content")
 
         assert result["document_record"].file_type == DocumentFileType.OTHER
+
+
+# ========== 懒加载嵌入服务（不触发模型下载） ==========
+
+
+def test_ingest_service_lazily_builds_and_reuses_embedding_service(monkeypatch):
+    from app.services import document_ingest_service as ingest_module
+
+    created: list[object] = []
+
+    def fake_embedding_service(dimension: int):
+        service = object()
+        created.append(service)
+        return service
+
+    monkeypatch.setattr(ingest_module, "EmbeddingService", fake_embedding_service)
+
+    service = DocumentIngestService(embedding_dimension=4)
+
+    first = service._get_embedding_service()
+    second = service._get_embedding_service()
+
+    assert first is second
+    assert created == [first]

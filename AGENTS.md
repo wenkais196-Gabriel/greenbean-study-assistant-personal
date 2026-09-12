@@ -110,6 +110,9 @@ python -m pip install -r requirements-dev.txt
 
 - 前端测试使用 Vitest，配置在 `vitest.config.ts`，覆盖率输出到 `coverage/frontend`。
 - Python 测试使用 pytest，`backend-python/tests/conftest.py` 会把 `backend-python` 加入 `sys.path`。
+- ⚠️ **提交前请跑 CI 的同一命令**：`pytest --cov=app --cov-config=tests/.coveragerc`（或 `npm run test:python:coverage`）。
+  `tests/.coveragerc` 里 `fail_under = 100`，只跑 `pytest tests` **不会**发现覆盖率不足 ——
+  已因此让 4 个 commit 在 CI 的 Python job 变红（前端与 Rust job 一直是绿的）。
 - `npm run test:python` 经 `scripts/run-pytest.cjs` 转发，会优先使用 `backend-python/.venv` 里的解释器；也可用 `PYTHON` 环境变量指定。
 - Rust 测试在 `src-tauri` 内执行 `cargo test`；覆盖率脚本依赖 `cargo llvm-cov`。
 - CI 使用 Node.js 22、Python 3.12，并在 Linux 上安装 Tauri 所需系统依赖。

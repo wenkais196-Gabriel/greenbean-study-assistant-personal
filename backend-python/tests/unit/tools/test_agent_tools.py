@@ -274,3 +274,16 @@ async def test_todo_generation_tool_handles_invalid_json_and_validation():
     assert unconfigured["success"] is False
     with pytest.raises(ValueError, match="content_summary cannot be empty"):
         await TodoGenerationTool(provider=provider).run(content_summary="   ")
+
+
+@pytest.mark.us("US-STAGE1-TOOLS-03")
+@pytest.mark.asyncio
+async def test_section_context_tool_reports_missing_section():
+    """找不到小节时要报失败，而不是返回 success 与空数据。"""
+    repository = MagicMock()
+    repository.get_by_id.return_value = None
+
+    result = await SectionContextTool(section_repository=repository).run(section_id="sec-x")
+
+    assert result["success"] is False
+    assert "not found" in result["error"]

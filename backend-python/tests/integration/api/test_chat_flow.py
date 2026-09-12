@@ -202,3 +202,11 @@ def test_retrieval_depth_follows_route_and_extended_flag(chat_env):
     assert service._retrieval_depth(RouteType.STRUCTURE, False) == service.top_k
     assert service._retrieval_depth(RouteType.COMPREHENSIVE, False) == service.top_k * 2
     assert service._retrieval_depth(RouteType.CONCEPT, True) == service.top_k * 2
+
+
+def test_get_chat_service_returns_a_configured_service_without_touching_disk():
+    """依赖注入函数本身也要可用：构造 service 时**不建库**（会话工厂是懒的）。"""
+    service = get_chat_service()
+
+    assert isinstance(service, ChatService)
+    assert callable(service.session_factory)
