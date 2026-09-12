@@ -5,6 +5,8 @@ ChunkRepository 批量持久化集成测试。
 """
 import sqlite3
 
+import sqlite_vec
+
 import pytest
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -20,6 +22,12 @@ from app.repositories.document_unit_repository import DocumentUnitRepository
 
 
 def load_test_sqlite_vec(connection: sqlite3.Connection) -> None:
+    """真加载 sqlite-vec（vec0 模块是建索引表的前提），但把 vec_version 覆盖为固定测试值。"""
+    connection.enable_load_extension(True)
+    try:
+        sqlite_vec.load(connection)
+    finally:
+        connection.enable_load_extension(False)
     connection.create_function("vec_version", 0, lambda: "test-sqlite-vec")
 
 

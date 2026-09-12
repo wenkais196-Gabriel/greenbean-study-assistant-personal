@@ -1,5 +1,7 @@
 import sqlite3
 
+import sqlite_vec
+
 import pytest
 
 from app.db.init_db import initialize_database
@@ -31,6 +33,12 @@ from app.repositories.section_repository import SectionRepository
 
 
 def load_test_sqlite_vec(connection: sqlite3.Connection) -> None:
+    """真加载 sqlite-vec（vec0 模块是建索引表的前提），但把 vec_version 覆盖为固定测试值。"""
+    connection.enable_load_extension(True)
+    try:
+        sqlite_vec.load(connection)
+    finally:
+        connection.enable_load_extension(False)
     connection.create_function("vec_version", 0, lambda: "test-sqlite-vec")
 
 

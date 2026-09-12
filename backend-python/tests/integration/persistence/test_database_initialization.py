@@ -1,6 +1,8 @@
 from contextlib import closing
 import sqlite3
 
+import sqlite_vec
+
 import pytest
 
 from app.db.init_db import (
@@ -15,6 +17,12 @@ from app.repositories.document_repository import DocumentRepository
 
 
 def load_test_sqlite_vec(connection: sqlite3.Connection) -> None:
+    """真加载 sqlite-vec（vec0 模块是建索引表的前提），但把 vec_version 覆盖为固定测试值。"""
+    connection.enable_load_extension(True)
+    try:
+        sqlite_vec.load(connection)
+    finally:
+        connection.enable_load_extension(False)
     connection.create_function("vec_version", 0, lambda: "test-sqlite-vec")
 
 
@@ -22,25 +30,19 @@ def fail_to_load_sqlite_vec(connection: sqlite3.Connection) -> None:
     raise RuntimeError("sqlite-vec extension missing")
 
 
-class FakeSQLiteConnection:
-    def __init__(self) -> None:
-        self.extension_states = []
-        self.loaded_extension = None
+def test_default_sqlite_vec_loader_loads_extension_into_connection():
+    """默认 loader 能把 sqlite-vec 真正加载进连接 —— 加载后可直接调用 vec_version()。
 
-    def enable_load_extension(self, enabled: bool) -> None:
-        self.extension_states.append(enabled)
+    原先这个用例用假 connection 断言"调用了 load_extension('sqlite_vec')"，
+    那测的是实现细节，而且掩盖了该方法在实际环境下不工作的事实。
+    """
+    with closing(sqlite3.connect(":memory:")) as connection:
+        load_sqlite_vec_extension(connection)
 
-    def load_extension(self, extension_name: str) -> None:
-        self.loaded_extension = extension_name
+        version = connection.execute("SELECT vec_version()").fetchone()[0]
 
-
-def test_default_sqlite_vec_loader_enables_loads_and_disables_extension():
-    connection = FakeSQLiteConnection()
-
-    load_sqlite_vec_extension(connection)
-
-    assert connection.extension_states == [True, False]
-    assert connection.loaded_extension == "sqlite_vec"
+    assert isinstance(version, str)
+    assert version.strip()
 
 
 def test_first_start_creates_data_dir_and_sqlite_database(tmp_path):
@@ -130,6 +132,7 @@ def test_successful_initialization_loads_sqlite_vec_and_creates_core_tables(tmp_
         "chat_sessions",
         "chat_messages",
         "embedding_vectors",
+        "embedding_index",
     }.issubset(table_names)
 
 
@@ -161,4 +164,3 @@ def test_sqlite_vec_health_check_rejects_empty_version(tmp_path):
             sqlite_vec_loader=load_empty_version,
             embedding_dimension=8,
         )
-

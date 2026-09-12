@@ -4,6 +4,8 @@ from pathlib import Path
 import sqlite3
 from typing import Callable
 
+import sqlite_vec
+
 
 SQLiteVecLoader = Callable[[sqlite3.Connection], None]
 
@@ -20,9 +22,17 @@ class DatabaseInitializationResult:
 
 
 def load_sqlite_vec_extension(connection: sqlite3.Connection) -> None:
+    """加载 sqlite-vec 扩展。
+
+    改用官方 Python 包的 `sqlite_vec.load()`，而不是 sqlite3 的 `load_extension("sqlite_vec")`：
+    后者要求动态库搜索路径中存在同名共享库，在 Windows + Python 3.12 上不成立
+    （实测报 "找不到指定的模块"）。
+
+    仍需保留 enable/disable 包装 —— 未启用扩展加载时 `sqlite_vec.load()` 会报 "not authorized"。
+    """
     connection.enable_load_extension(True)
     try:
-        connection.load_extension("sqlite_vec")
+        sqlite_vec.load(connection)
     finally:
         connection.enable_load_extension(False)
 
@@ -209,6 +219,14 @@ def _create_schema(connection: sqlite3.Connection, embedding_dimension: int) -> 
             value TEXT NOT NULL
         );
         """
+    )
+    # 向量索引（sqlite-vec 的 vec0 虚拟表）。
+    # ⚠️ 维度在建表时固定，sqlite-vec 不支持就地改维度：换 embedding 模型必须重建该表。
+    # 它会创建若干伴生表（embedding_index_info / _chunks / _rowids / _vector_chunks00），
+    # 这是 sqlite-vec 的正常行为。
+    connection.execute(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS embedding_index USING vec0("
+        f"chunk_id TEXT PRIMARY KEY, embedding float[{int(embedding_dimension)}])"
     )
     connection.execute(
         """
