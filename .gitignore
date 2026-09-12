@@ -83,3 +83,9 @@ temp/
 # Codex local UI assets
 .codex-pets/
 backend-python/api_key.json
+
+# Local planning notes (private, not published with the repository)
+planning/
+
+# Local agent tooling workspace
+.reasonix/
