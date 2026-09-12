@@ -54,6 +54,9 @@ SOURCE_TYPE_TO_FILE_TYPE: dict[str, DocumentFileType] = {
 ProgressCallback = Callable[[IngestStage, float], None]
 """`on_progress(阶段, 该阶段完成度 0~1)`；整体进度的加权换算由调用方决定。"""
 
+# span 名称：成功与失败两条分支**必须同名**，否则同一次摄取会在两个分支下变成两类数据
+SPAN_INGEST_DOCUMENT = "ingest.document"
+
 
 class DocumentIngestService:
     """安全文档摄取流水线：解析 → 实体构建 → 切块 → 嵌入 → （可选）落库。"""
@@ -125,7 +128,7 @@ class DocumentIngestService:
             )
         except Exception as exc:
             self._record(
-                "ingest.document",
+                SPAN_INGEST_DOCUMENT,
                 elapsed_ms(started),
                 status=TraceStatus.ERROR,
                 error=f"{type(exc).__name__}: {exc}",
@@ -137,7 +140,7 @@ class DocumentIngestService:
             raise
         else:
             self._record(
-                "ingest.document",
+                SPAN_INGEST_DOCUMENT,
                 elapsed_ms(started),
                 **{
                     "greenbean.ingest.filename": filename,

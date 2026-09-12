@@ -32,6 +32,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+# Windows 的 stdout 默认是 GBK：本脚本要打印 ✅/❌，一旦重定向到文件（或跑在 CI 里）
+# 就会 UnicodeEncodeError 直接崩在半路。显式声明 UTF-8，别让输出环境决定脚本能不能跑完。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 import fitz  # noqa: E402  # PyMuPDF：诊断需要「未修复」的原始提取
 import numpy as np  # noqa: E402
 from fastembed import TextEmbedding  # noqa: E402
