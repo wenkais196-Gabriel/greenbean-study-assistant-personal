@@ -13,6 +13,11 @@ DATABASE_NAME = "greenbean-study-assistant.sqlite3"
 EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 EMBEDDING_DIMENSION = 384
 
+# 嵌入输入的字符上限：只为拦住异常超长文本，正常 chunk（DEFAULT_CHUNK_SIZE）不会被动到。
+# ⚠️ 注意：模型自身还有 128 token 的序列上限，与 DEFAULT_CHUNK_SIZE 存在张力，
+# 详见 docs/specs/us-stage1-embedding.md §12 —— 该问题要靠评测用数据解决，不能靠这里截断。
+MAX_EMBED_CHARS = 1000
+
 # ---- 切块（按字符计）----
 DEFAULT_CHUNK_SIZE = 800
 DEFAULT_CHUNK_OVERLAP = 120
