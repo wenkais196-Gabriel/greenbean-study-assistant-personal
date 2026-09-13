@@ -2,10 +2,8 @@
 Analysis Result Tool for Agent querying previous AI analyses.
 
 依赖契约：注入的 `analysis_repository` 需提供 `get_by_workspace_id(workspace_id)`（同步）。
-
-⚠️ **待办**：生产 `AnalysisResultRepository` 目前只有 `save` / `get_by_id`，
-既没有按 workspace 的查询方法，`analysis_results` 表也没有 workspace 列（要经 document 关联）——
-这个工具在补齐仓储层查询之前**接不上生产**。
+生产的 `AnalysisResultRepository.get_by_workspace_id` 经 `document_records` 关联过滤
+（`analysis_results` 表没有 workspace 列），装配见 `app/tools/factory.py`。
 
 `section_id` 参数目前不参与查询（保留给将来的按小节过滤）。
 """
@@ -29,7 +27,7 @@ class AnalysisResultTool:
 
         results = self.analysis_repository.get_by_workspace_id(workspace_id)
         formatted = [
-            {"id": item.id, "summary": getattr(item, "summary", "")}
+            {"id": item.id, "summary": item.summary or ""}
             for item in (results or [])
         ]
         return {"success": True, "data": formatted}

@@ -39,16 +39,24 @@ class Retriever:
         self,
         repository: EmbeddingRepository,
         query: str,
+        *,
+        workspace_id: str | None = None,
     ) -> list[RetrievalHit]:
         """按语义召回最多 top_k 个片段。
 
         空白查询直接返回空列表，且**不加载模型**。
+
+        :param workspace_id: 只召回该工作区的片段；`None`（默认）表示不过滤 ——
+            生产问答链路按默认调用，行为不变。⚠️ 过滤发生在取完 k 条**之后**（vec0 语义），
+            要拿满 top_k 得由调用方过采样（见 `app/tools/adapters.py`）。
         """
         if not query.strip():
             return []
 
         vector = self.embedding_service.embed_query(query)
-        rows = repository.search_similar(vector, top_k=self.top_k)
+        rows = repository.search_similar(
+            vector, top_k=self.top_k, workspace_id=workspace_id
+        )
         hits = [RetrievalHit(chunk_id=row[0], distance=row[1]) for row in rows]
 
         if self.max_distance is not None:

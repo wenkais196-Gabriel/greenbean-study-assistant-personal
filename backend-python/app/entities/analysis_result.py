@@ -14,6 +14,7 @@ class AnalysisResult(BaseModel):
     analysis_type: AnalysisType = Field(..., description="分析范围：全文解析或小节解析。")
     language: str = Field(..., description="分析结果语言。")
     content_markdown: str = Field(..., description="用于展示的 Markdown 内容。")
+    summary: str | None = Field(default=None, description="分析结果摘要，供列表展示（可空）。")
     content_json: dict[str, Any] | None = Field(default=None, description="供程序读取的结构化分析内容。")
     model_name: str | None = Field(default=None, description="生成结果使用的 AI 模型名称。")
     prompt_version: str | None = Field(default=None, description="生成结果使用的提示词模板版本。")

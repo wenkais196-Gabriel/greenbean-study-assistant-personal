@@ -33,8 +33,10 @@ GreenBean Study Assistant 是面向在法国学习的中文学生的 AI 课程�
 - `backend-python/app/rag/`：**已实现**（`retriever` / `context_builder` / `vector_index_builder`）；
   46 条 golden set 实测 **HitRate@5 90.0% / @20 97.5% / MRR 0.845**（[`docs/eval-report-golden.md`](docs/eval-report-golden.md)）。
   ⚠️ 这个数字与此前 12 条的 66.7% **口径不同、不可直接比较**（判定方式、数据集、`chunk_size` 都变了）。
-- `backend-python/app/tools/`：6 个工具**已实现但尚未接生产对象** —— 每个工具 docstring 里都写了明确待办
-  （检索适配器、workspace 过滤、按 workspace 查询的仓储方法）。
+- `backend-python/app/tools/`：6 个工具**已实现、且已接生产对象**（2026-09-13）——
+  `app/tools/adapters.py` 提供检索适配器（含 workspace 过滤）与 session 作用域仓储代理，
+  `app/tools/factory.py` 的 `build_tools()` 是唯一装配入口；规格
+  [`docs/specs/us-stage2-tools-wiring.md`](docs/specs/us-stage2-tools-wiring.md)。
 - `backend-python/app/agents/`：`RouterAgent`（三分类 + 降级，降级与否记在 `degraded`）与 `ChatAgent`
   **已接真实检索上下文**（由 `ChatService` 注入，不再是 mock）；仍是**单轮编排** ——
   tool calling / 多步编排待阶段 2。
@@ -45,7 +47,8 @@ GreenBean Study Assistant 是面向在法国学习的中文学生的 AI 课程�
   需要 LLM provider key。
 
 闭环规格：`docs/specs/us-stage1-ingest.md`、`us-stage1-chat.md`、`us-stage1-upload-async.md`、`us-stage1-trace.md`、
-`us-stage1-ui-integration.md`（界面接入：前端真实问答 / 会话持久化 / 模型配置）。
+`us-stage1-ui-integration.md`（界面接入：前端真实问答 / 会话持久化 / 模型配置）、
+`us-stage2-tools-wiring.md`（Agent 工具接生产对象）。
 
 **生产向量配置（2026-09-12 起）**：`intfloat/multilingual-e5-large`（1024 维，序列上限 512 token）。
 e5 系列要求 query / passage 前缀，由 `settings.EMBEDDING_QUERY_PREFIX` / `EMBEDDING_PASSAGE_PREFIX` 配置；

@@ -100,6 +100,21 @@ def _ensure_vector_index(connection: sqlite3.Connection, embedding_dimension: in
         )
 
 
+def _ensure_analysis_result_summary(connection: sqlite3.Connection) -> None:
+    """给旧库的 `analysis_results` 补上 `summary` 列（幂等）。
+
+    `CREATE TABLE IF NOT EXISTS` 不会给**已存在**的表加列，所以旧库要显式 ALTER；
+    而 SQLite 的 `ADD COLUMN` 不支持 `IF NOT EXISTS`，因此先查 `PRAGMA table_info`
+    —— 与 `_ensure_vector_index` 同样的"先看现状、再补齐"思路。
+    """
+    columns = {
+        row[1]
+        for row in connection.execute("PRAGMA table_info(analysis_results)").fetchall()
+    }
+    if "summary" not in columns:
+        connection.execute("ALTER TABLE analysis_results ADD COLUMN summary TEXT")
+
+
 def _check_sqlite_vec(connection: sqlite3.Connection) -> str:
     try:
         row = connection.execute("SELECT vec_version()").fetchone()
@@ -192,6 +207,7 @@ def _create_schema(connection: sqlite3.Connection, embedding_dimension: int) -> 
             analysis_type TEXT NOT NULL,
             language TEXT NOT NULL,
             content_markdown TEXT NOT NULL,
+            summary TEXT,
             content_json TEXT,
             model_name TEXT,
             prompt_version TEXT,
@@ -285,6 +301,8 @@ def _create_schema(connection: sqlite3.Connection, embedding_dimension: int) -> 
     # 它会创建若干伴生表（embedding_index_info / _chunks / _rowids / _vector_chunks00），
     # 这是 sqlite-vec 的正常行为。
     _ensure_vector_index(connection, embedding_dimension)
+    # 旧库补列（纯新增字段，不重建表）：CREATE TABLE IF NOT EXISTS 不会给已存在的表加列。
+    _ensure_analysis_result_summary(connection)
     connection.execute(
         """
         INSERT INTO app_metadata(key, value)

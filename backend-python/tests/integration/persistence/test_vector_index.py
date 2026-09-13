@@ -54,10 +54,12 @@ def session_factory(tmp_path):
     engine.dispose()
 
 
-def seed_chunk(session_factory, *, chunk_id: str = "chunk-1") -> str:
+def seed_chunk(
+    session_factory, *, chunk_id: str = "chunk-1", workspace_id: str = "workspace_1"
+) -> str:
     """经 repository 写入 DocumentRecord + DocumentUnit + Chunk，返回 chunk_id。"""
     document = DocumentRecord(
-        workspace_id="workspace_1",
+        workspace_id=workspace_id,
         title="Cours d'algorithmique",
         original_filename="cours.pdf",
         file_type=DocumentFileType.PDF,
@@ -290,3 +292,73 @@ def test_initialize_database_fails_when_loader_fails(tmp_path):
             embedding_dimension=DIMENSION,
             sqlite_vec_loader=failing_loader,
         )
+
+
+def test_search_similar_filters_hits_by_workspace(session_factory):
+    """按 workspace 过滤要经 document_units → document_records 关联 —— chunks 表没有 workspace 列。"""
+    in_scope = seed_chunk(session_factory, chunk_id="chunk-in", workspace_id="workspace_1")
+    out_of_scope = seed_chunk(session_factory, chunk_id="chunk-out", workspace_id="workspace_2")
+
+    with session_factory() as session:
+        repository = EmbeddingRepository(session, embedding_dimension=DIMENSION)
+        # 越界的那个离查询更近：不过滤时它必然排第一，过滤后必须消失
+        repository.save_to_index(chunk_id=in_scope, vector=make_vector(0.5))
+        repository.save_to_index(chunk_id=out_of_scope, vector=make_vector(0.0))
+        session.commit()
+
+    with session_factory() as session:
+        results = EmbeddingRepository(session, embedding_dimension=DIMENSION).search_similar(
+            make_vector(0.0), top_k=5, workspace_id="workspace_1"
+        )
+
+    assert [row[0] for row in results] == [in_scope]
+
+
+def test_search_similar_without_workspace_returns_every_workspace(session_factory):
+    """`workspace_id=None` 是**不过滤**（生产问答链路就这么调用），行为不能变。"""
+    first = seed_chunk(session_factory, chunk_id="chunk-a", workspace_id="workspace_1")
+    second = seed_chunk(session_factory, chunk_id="chunk-b", workspace_id="workspace_2")
+
+    with session_factory() as session:
+        repository = EmbeddingRepository(session, embedding_dimension=DIMENSION)
+        repository.save_to_index(chunk_id=first, vector=make_vector(0.0))
+        repository.save_to_index(chunk_id=second, vector=make_vector(1.0))
+        session.commit()
+
+    with session_factory() as session:
+        results = EmbeddingRepository(session, embedding_dimension=DIMENSION).search_similar(
+            make_vector(0.0), top_k=5
+        )
+
+    assert [row[0] for row in results] == [first, second]
+
+
+def test_search_similar_filters_by_workspace_before_truncating_to_top_k(session_factory):
+    """锁定 vec0 **子查询形式的过滤是 pre-filter**：`k` 作用在过滤**之后**。
+
+    本 workspace 的片段全局排第 3 时，`top_k=1` 也能拿到它 —— 这就是检索适配器
+    **不需要过采样**的依据（app/tools/adapters.py）。若把同一条件改写成 JOIN 或字面量 IN，
+    行为会变成 post-filter（实测同样场景返回空），所以这条用例也守着"别把过滤写成 JOIN"。
+    见 docs/specs/us-stage2-tools-wiring.md §4。
+    """
+    seed_chunk(session_factory, chunk_id="out-1", workspace_id="workspace_2")
+    seed_chunk(session_factory, chunk_id="out-2", workspace_id="workspace_2")
+    in_scope = seed_chunk(session_factory, chunk_id="in-1", workspace_id="workspace_1")
+
+    with session_factory() as session:
+        repository = EmbeddingRepository(session, embedding_dimension=DIMENSION)
+        repository.save_to_index(chunk_id="out-1", vector=make_vector(0.0))
+        repository.save_to_index(chunk_id="out-2", vector=make_vector(0.1))
+        repository.save_to_index(chunk_id=in_scope, vector=make_vector(0.9))
+        session.commit()
+
+    with session_factory() as session:
+        narrow = EmbeddingRepository(session, embedding_dimension=DIMENSION).search_similar(
+            make_vector(0.0), top_k=1, workspace_id="workspace_1"
+        )
+        wide = EmbeddingRepository(session, embedding_dimension=DIMENSION).search_similar(
+            make_vector(0.0), top_k=3, workspace_id="workspace_1"
+        )
+
+    assert [row[0] for row in narrow] == [in_scope]
+    assert [row[0] for row in wide] == [in_scope]

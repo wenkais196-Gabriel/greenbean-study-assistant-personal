@@ -4,10 +4,10 @@ Chunk Search Tool for Agent retrieval.
 依赖契约：注入的 `retriever` 需实现 `search(query, workspace_id, top_k) -> list[dict]`，
 同步或异步实现都可以（工具会按需 `await`）。
 
-⚠️ 与生产链路的两处差距（**待办**，接生产前必须先解决）：
-1. 生产 `Retriever` 只有 `retrieve(repository, query)` —— 需要一层适配器把它包成上面的协议；
-2. `workspace_id` 过滤目前在**数据模型上做不到**：`chunks` 表没有 workspace 列
-   （要经 `document_units → document_records` 关联），所以该参数只透传给实现方，本工具不自行过滤。
+⚠️ 本工具只**透传** `workspace_id`、不自行过滤 —— 过滤是检索实现方的职责。
+生产实现见 `app/tools/adapters.py` 的 `ProductionChunkSearcher`（装配走 `app/tools/factory.py`）：
+它把 `Retriever` 包成上面的协议，按 workspace 过滤（`chunks` 表没有 workspace 列，
+要经 `document_units → document_records` 关联），并**过采样**（vec0 的 k 在过滤前生效）。
 """
 
 import inspect

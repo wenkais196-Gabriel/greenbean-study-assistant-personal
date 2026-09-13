@@ -138,6 +138,7 @@ class EmbeddingRepository:
         vector: list[float],
         *,
         top_k: int,
+        workspace_id: str | None = None,
     ) -> list[tuple[str, float]]:
         """按距离升序返回 top_k 个最相近的 chunk。
 
@@ -145,15 +146,33 @@ class EmbeddingRepository:
         **非平方 L2（欧氏距离）**，不是平方 L2：实测与自算平方 L2 偏差 9.906、
         与自算欧氏距离偏差 0.000001（见 docs/retrieval-diagnosis.md §3.4）。
         若日后要改成 cosine，需要在写入与查询前对向量做归一化。
+
+        :param workspace_id: 只返回该工作区的片段（`chunks` 表没有 workspace 列，
+            要经 `document_units` → `document_records` 关联）。⚠️ 该条件由 sqlite-vec
+            **在取完 k 条之后**应用（实测：本工作区的片段排全局第 3 时，`top_k=2` 拿不到它），
+            因此传了它就未必拿满 top_k —— 需要满额召回请先放大 top_k
+            （见 `app/tools/adapters.py`）。
         """
         self._validate_dimension(vector)
-        rows = self.session.execute(
-            text(
-                "SELECT chunk_id, distance FROM embedding_index "
-                "WHERE embedding MATCH :embedding AND k = :top_k"
-            ),
-            {"embedding": _to_vec0_literal(vector), "top_k": top_k},
-        ).all()
+        statement = (
+            "SELECT chunk_id, distance FROM embedding_index "
+            "WHERE embedding MATCH :embedding AND k = :top_k"
+        )
+        parameters: dict[str, object] = {
+            "embedding": _to_vec0_literal(vector),
+            "top_k": top_k,
+        }
+        if workspace_id is not None:
+            statement += (
+                " AND chunk_id IN ("
+                "SELECT chunks.id FROM chunks "
+                "JOIN document_units ON document_units.id = chunks.document_unit_id "
+                "JOIN document_records ON document_records.id = document_units.document_id "
+                "WHERE document_records.workspace_id = :workspace_id)"
+            )
+            parameters["workspace_id"] = workspace_id
+
+        rows = self.session.execute(text(statement), parameters).all()
         return [(row[0], row[1]) for row in rows]
 
     def _validate_dimension(self, vector: list[float]) -> None:

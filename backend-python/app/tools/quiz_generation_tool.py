@@ -1,12 +1,13 @@
 """
 Quiz Generation Tool for Agent learning assistance.
 
-⚠️ **待办**：提示词应集中到 `app/prompts/`（该目录已有 analysis / chat / classification / todo），
-目前 quiz 的提示词仍内联在本文件里。
+提示词来自 `app/prompts/quiz_prompts.py`（集中管理，不内联在工具里）。
 """
 
 import json
 from typing import Any, Dict, Optional
+
+from app.prompts.quiz_prompts import QUIZ_SYSTEM_PROMPT, QUIZ_USER_PROMPT_TPL
 
 DEFAULT_QUIZ_COUNT = 3
 
@@ -33,10 +34,14 @@ class QuizGenerationTool:
 
         response = await self.provider.chat_completion(
             messages=[
+                {"role": "system", "content": QUIZ_SYSTEM_PROMPT},
                 {
                     "role": "user",
-                    "content": f"Generate {num_questions} quizzes for: {context_text}",
-                }
+                    "content": QUIZ_USER_PROMPT_TPL.substitute(
+                        num_questions=num_questions,
+                        context_text=context_text,
+                    ),
+                },
             ]
         )
         try:

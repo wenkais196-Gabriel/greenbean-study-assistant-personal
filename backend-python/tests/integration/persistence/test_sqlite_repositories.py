@@ -96,6 +96,7 @@ def make_core_learning_data():
         analysis_type=AnalysisType.SECTION,
         language="zh",
         content_markdown="课程目标总结",
+        summary="课程目标摘要",
         model_name="test-model",
     )
     chat_session = ChatSession(
@@ -130,7 +131,9 @@ def test_repositories_persist_core_learning_data_after_reconnect(session_factory
         assert DocumentUnitRepository(session).get_by_id(unit.id).text_content == unit.text_content
         assert SectionRepository(session).get_by_id(section.id).title == "Course objectives"
         assert ChunkRepository(session).get_by_id(chunk.id).document_unit_id == unit.id
-        assert AnalysisResultRepository(session).get_by_id(analysis_result.id).section_id == section.id
+        persisted_analysis = AnalysisResultRepository(session).get_by_id(analysis_result.id)
+        assert persisted_analysis.section_id == section.id
+        assert persisted_analysis.summary == "课程目标摘要"
         assert ChatSessionRepository(session).get_by_id(chat_session.id).document_id == document.id
         assert ChatMessageRepository(session).get_by_id(chat_message.id).session_id == chat_session.id
 
@@ -289,4 +292,51 @@ def test_provider_config_repository_update(session_factory):
         session.commit()
     with session_factory() as session:
         assert ProviderConfigRepository(session).get_by_id(config.id).name == "updated"
+
+
+def test_analysis_result_repository_get_by_workspace_id(session_factory):
+    """analysis_results 没有 workspace 列 —— 查询要经 document_records 关联过滤。"""
+    in_scope_document, *_ = make_core_learning_data()
+    other_document = DocumentRecord(
+        workspace_id="workspace_2",
+        title="Autre cours",
+        original_filename="autre.pdf",
+        file_type=DocumentFileType.PDF,
+        file_path="data/uploads/autre.pdf",
+    )
+
+    with session_factory() as session:
+        DocumentRepository(session).save(in_scope_document)
+        DocumentRepository(session).save(other_document)
+        AnalysisResultRepository(session).save(
+            AnalysisResult(
+                document_id=in_scope_document.id,
+                analysis_type=AnalysisType.FULL_DOCUMENT,
+                language="zh",
+                content_markdown="工作区一的全文分析",
+                summary="工作区一的摘要",
+            )
+        )
+        AnalysisResultRepository(session).save(
+            AnalysisResult(
+                document_id=other_document.id,
+                analysis_type=AnalysisType.FULL_DOCUMENT,
+                language="zh",
+                content_markdown="工作区二的全文分析",
+                summary="工作区二的摘要",
+            )
+        )
+        session.commit()
+
+    with session_factory() as session:
+        results = AnalysisResultRepository(session).get_by_workspace_id("workspace_1")
+
+    assert [result.summary for result in results] == ["工作区一的摘要"]
+
+
+def test_analysis_result_repository_get_by_workspace_id_returns_empty_list_when_unmatched(
+    session_factory,
+):
+    with session_factory() as session:
+        assert AnalysisResultRepository(session).get_by_workspace_id("inconnu") == []
 

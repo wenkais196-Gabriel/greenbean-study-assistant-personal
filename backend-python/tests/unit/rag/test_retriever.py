@@ -20,14 +20,18 @@ class FakeEmbeddingService:
 
 
 class FakeEmbeddingRepository:
-    """按预设结果返回，并记录收到的 top_k。"""
+    """按预设结果返回，并记录收到的 top_k 与 workspace_id。"""
 
     def __init__(self, results: list[tuple[str, float]]) -> None:
         self.results = results
         self.top_k_calls: list[int] = []
+        self.workspace_calls: list[str | None] = []
 
-    def search_similar(self, vector: list[float], *, top_k: int) -> list[tuple[str, float]]:
+    def search_similar(
+        self, vector: list[float], *, top_k: int, workspace_id: str | None = None
+    ) -> list[tuple[str, float]]:
         self.top_k_calls.append(top_k)
+        self.workspace_calls.append(workspace_id)
         return self.results[:top_k]
 
 
@@ -100,3 +104,14 @@ def test_blank_query_returns_empty_without_embedding(blank_query):
 def test_invalid_top_k_is_rejected(top_k):
     with pytest.raises(ValueError):
         Retriever(FakeEmbeddingService(), top_k=top_k)
+
+
+def test_retrieve_passes_workspace_filter_through_and_defaults_to_none():
+    """`workspace_id` 只透传给 repository：不传 = None（不过滤），传了原样下传。"""
+    retriever, _ = make_retriever()
+    repository = FakeEmbeddingRepository([("c1", 0.0)])
+
+    retriever.retrieve(repository, "question")
+    retriever.retrieve(repository, "question", workspace_id="ws-a")
+
+    assert repository.workspace_calls == [None, "ws-a"]

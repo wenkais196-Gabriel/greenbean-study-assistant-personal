@@ -243,3 +243,64 @@ def test_ingest_jobs_table_is_added_to_an_existing_database(tmp_path):
     assert "ingest_jobs" in _table_names(database_path)
     with closing(sqlite3.connect(database_path)) as connection:
         assert connection.execute("SELECT COUNT(*) FROM document_records").fetchone()[0] == 1
+
+
+def _analysis_result_columns(database_path) -> set[str]:
+    with closing(sqlite3.connect(database_path)) as connection:
+        return {
+            row[1] for row in connection.execute("PRAGMA table_info(analysis_results)")
+        }
+
+
+def test_analysis_results_table_has_summary_column_for_a_fresh_database(tmp_path):
+    """新库直接带上 summary 列（见 docs/specs/us-stage2-tools-wiring.md §5）。"""
+    result = initialize_database(
+        data_dir=tmp_path / "data",
+        sqlite_vec_loader=load_test_sqlite_vec,
+        embedding_dimension=8,
+    )
+
+    assert "summary" in _analysis_result_columns(result.database_path)
+
+
+def test_analysis_result_summary_column_is_added_to_an_existing_database(tmp_path):
+    """旧库的 analysis_results 没有 summary 列 —— 重启后要自动补列，且既有数据分毫不动。"""
+    data_dir = tmp_path / "data"
+    initialize_database(
+        data_dir=data_dir,
+        sqlite_vec_loader=load_test_sqlite_vec,
+        embedding_dimension=8,
+    )
+    database_path = data_dir / "greenbean-study-assistant.sqlite3"
+
+    engine = create_database_engine(database_path, sqlite_vec_loader=load_test_sqlite_vec)
+    try:
+        with create_session_factory(engine)() as session:
+            DocumentRepository(session).save(
+                DocumentRecord(
+                    workspace_id="ws-1",
+                    title="cours",
+                    original_filename="cours.pdf",
+                    file_type=DocumentFileType.PDF,
+                    file_path="",
+                )
+            )
+            session.commit()
+    finally:
+        engine.dispose()
+
+    # 模拟"本批之前"建的库：把 summary 列摘掉
+    with closing(sqlite3.connect(database_path)) as connection:
+        connection.execute("ALTER TABLE analysis_results DROP COLUMN summary")
+        connection.commit()
+    assert "summary" not in _analysis_result_columns(database_path)
+
+    initialize_database(
+        data_dir=data_dir,
+        sqlite_vec_loader=load_test_sqlite_vec,
+        embedding_dimension=8,
+    )
+
+    assert "summary" in _analysis_result_columns(database_path)
+    with closing(sqlite3.connect(database_path)) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM document_records").fetchone()[0] == 1

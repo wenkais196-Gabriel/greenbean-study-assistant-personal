@@ -11,6 +11,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from app.entities import AnalysisResult
+from app.enums import AnalysisType
 from app.tools.analysis_result_tool import AnalysisResultTool
 from app.tools.chunk_search_tool import ChunkSearchTool
 from app.tools.document_retrieval_tool import DocumentRetrievalTool
@@ -170,16 +172,39 @@ async def test_section_context_tool_empty_id_and_unconfigured():
 @pytest.mark.us("US-STAGE1-TOOLS-04")
 @pytest.mark.asyncio
 async def test_analysis_result_tool_formats_stored_summaries():
+    """用真实实体而不是 MagicMock：接生产后 summary 是真字段，mock 再也兜不住它。"""
+    analysis = AnalysisResult(
+        document_id="doc-1",
+        analysis_type=AnalysisType.FULL_DOCUMENT,
+        language="zh",
+        content_markdown="# Résumé du chapitre",
+        summary="Résumé du chapitre",
+    )
     repository = MagicMock()
-    analysis = MagicMock()
-    analysis.id = "ana-1"
-    analysis.summary = "Résumé du chapitre"
     repository.get_by_workspace_id.return_value = [analysis]
 
     result = await AnalysisResultTool(analysis_repository=repository).run(workspace_id="ws-1")
 
     assert result["success"] is True
-    assert result["data"] == [{"id": "ana-1", "summary": "Résumé du chapitre"}]
+    assert result["data"] == [{"id": analysis.id, "summary": "Résumé du chapitre"}]
+
+
+@pytest.mark.us("US-STAGE1-TOOLS-04")
+@pytest.mark.asyncio
+async def test_analysis_result_tool_reports_empty_summary_when_absent():
+    """摘要缺失（可空字段）时返回空串，而不是 None 让调用方崩在字符串操作上。"""
+    analysis = AnalysisResult(
+        document_id="doc-1",
+        analysis_type=AnalysisType.FULL_DOCUMENT,
+        language="zh",
+        content_markdown="# Sans résumé",
+    )
+    repository = MagicMock()
+    repository.get_by_workspace_id.return_value = [analysis]
+
+    result = await AnalysisResultTool(analysis_repository=repository).run(workspace_id="ws-1")
+
+    assert result["data"] == [{"id": analysis.id, "summary": ""}]
 
 
 @pytest.mark.us("US-STAGE1-TOOLS-04")
@@ -219,6 +244,12 @@ async def test_quiz_generation_tool_parses_provider_json():
 
     assert result["success"] is True
     assert result["data"]["quizzes"][0]["question"] == "Qu'est-ce qu'un graphe?"
+
+    messages = provider.chat_completion.call_args.kwargs["messages"]
+    assert messages[0]["role"] == "system"
+    assert "study quizzes" in messages[0]["content"]  # 文案来自 app/prompts/quiz_prompts.py
+    assert "Les graphes..." in messages[1]["content"]
+    assert "1" in messages[1]["content"]
 
 
 @pytest.mark.us("US-STAGE1-TOOLS-05")

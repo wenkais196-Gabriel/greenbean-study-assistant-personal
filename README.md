@@ -31,14 +31,14 @@
 | 模型配置（`/api/providers` 列表 / 新增 / 更新 / 删除 / 激活，界面「设置」面板） | 已实现，有测试覆盖；**响应不回传 `api_key`**，重名回 409 |
 | 结构化 trace（`agent_traces`，字段对齐 OTel `gen_ai.*`） | 已实现 |
 | L1 检索评测（`eval/`） | 已实现：46 条 golden set，零 LLM 成本、完全可重复 |
-| Agent 工具（`app/tools/`） | 已实现，但**尚未接生产对象**（每个工具 docstring 里写了待办） |
+| Agent 工具（`app/tools/`） | 已实现，且**已接生产对象**：`adapters.py`（检索适配 + workspace 过滤）、`factory.py`（统一装配） |
 | Agent 编排（`app/agents/`） | **单轮**：路由 → 检索 → 带来源回答；tool calling / 多步编排待阶段 2 |
 | 生成层评测（L2：引用准确率 / 拒答正确率） | 未做 —— 需要 LLM provider key |
 
 实测基线（本机 Windows / Python 3.12 / Node 24）：
 
-- Python：`450 passed`，覆盖率 `100%`（`fail_under=100` 硬门槛）
-- 前端：`289 passed`（19 个测试文件）
+- Python：`479 passed`，覆盖率 `100%`（`fail_under=100` 硬门槛）
+- 前端：`293 passed`（19 个测试文件）
 - 检索（L1，40 条可评测）：HitRate@5 `90.0%`、@20 `97.5%`、MRR `0.845`
   —— 见 [`docs/eval-report-golden.md`](docs/eval-report-golden.md)、[`eval/README.md`](eval/README.md)
 
