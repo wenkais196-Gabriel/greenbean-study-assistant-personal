@@ -11,6 +11,7 @@ from app.db.runtime import lazy_session_factory
 from app.providers.base import AIProvider
 from app.providers.registry import ProviderNotFoundError, ProviderRegistry
 from app.services.embedding_service import EmbeddingService
+from app.config.settings import EMBEDDING_DIMENSION
 from app.tools.adapters import (
     ProductionChunkSearcher,
     SessionScopedAnalysisResultRepository,
@@ -42,6 +43,7 @@ def build_tools(
     session_factory: SessionFactory | None = None,
     embedding_service: EmbeddingService | None = None,
     provider: AIProvider | None = None,
+    embedding_dimension: int = EMBEDDING_DIMENSION,
 ) -> ToolSet:
     """装配六个工具。
 
@@ -49,6 +51,8 @@ def build_tools(
     :param embedding_service: 嵌入服务；默认由检索适配器懒加载（测试请注入假模型）
     :param provider: 生成类工具用的 provider；默认取当前激活的那个。没有激活的 provider
         时留空 —— 装配不该因此失败，工具被调用时会报 `not configured`
+    :param embedding_dimension: 检索适配器用的向量维度；**必须与建库时一致**
+        （测试库是 8 维，生产是 settings 里的 1024 维）
     """
     session_factory = session_factory or lazy_session_factory()
     provider = provider or _active_provider_or_none()
@@ -58,6 +62,7 @@ def build_tools(
             retriever=ProductionChunkSearcher(
                 session_factory=session_factory,
                 embedding_service=embedding_service,
+                embedding_dimension=embedding_dimension,
             )
         ),
         document_retrieval=DocumentRetrievalTool(

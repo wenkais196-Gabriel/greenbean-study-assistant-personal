@@ -449,3 +449,57 @@ def test_failed_answer_does_not_persist(chat_env):
     assert response.status_code == 503
     assert _stored_session(session_factory, "s-failed") is None
     assert _stored_messages(session_factory, "s-failed") == []
+
+
+# ===== 阶段 2：Agent 工具调用循环（US-STAGE2-TOOL-LOOP）=====
+from app.providers.base import ToolCall  # noqa: E402
+
+
+def test_chat_agent_tool_loop_executes_real_tool_when_model_asks(chat_env):
+    """模型第一轮要求 chunk_search → 真库真检索执行 → 结果回喂 → 第二轮给出答案。
+
+    这是"工具接生产"与"Agent 循环"的合龙：模型要工具、工具查生产库、答案带第二轮结果。
+    """
+    service, session_factory, embedding_service, pdf_bytes = chat_env
+    _ingest(session_factory, embedding_service, pdf_bytes)
+
+    router_registry, chat_registry = _patched_providers()
+    app.dependency_overrides[get_chat_service] = lambda: service
+    try:
+        with router_registry as router_patch, chat_registry as chat_patch:
+            router_provider = MagicMock()
+            router_provider.chat_completion = AsyncMock(return_value=ChatResult(content=ROUTE_JSON))
+            router_patch.get_active.return_value = router_provider
+
+            chat_provider = MagicMock()
+            chat_provider.chat_completion = AsyncMock(
+                side_effect=[
+                    ChatResult(
+                        content="",
+                        tool_calls=[
+                            ToolCall(
+                                id="call-1",
+                                name="chunk_search_tool",
+                                arguments={"query": "document", "workspace_id": "ws-1", "top_k": 3},
+                            )
+                        ],
+                    ),
+                    ChatResult(content="补充检索后的回答 [来源 1]"),
+                ]
+            )
+            chat_patch.get_active.return_value = chat_provider
+
+            response = TestClient(app).post(
+                "/api/chat",
+                json={"session_id": "s-tools", "query": "这份文档讲了什么？"},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["answer"] == "补充检索后的回答 [来源 1]"
+
+    second_call = chat_provider.chat_completion.call_args_list[1]
+    tool_messages = [m for m in second_call.kwargs["messages"] if m.get("role") == "tool"]
+    assert tool_messages, "工具结果必须作为 tool 消息回喂给模型"
+    assert '"success"' in tool_messages[0]["content"]

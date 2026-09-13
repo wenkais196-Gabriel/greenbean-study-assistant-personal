@@ -9,13 +9,15 @@
 `asyncio.to_thread` 丢进线程池 —— 与上传路径同样的处理方式，避免阻塞事件循环。
 
 trace（见 docs/specs/us-stage1-trace.md）：本服务产出 `agent.route` / `retrieval.search` /
-`context.build` 三条 span，并把 `trace_id` 回填给调用方；两次 LLM 调用由 agent 经
-`traced_chat_completion` 记录。
+`context.build` 三条 span，并把 `trace_id` 回填给调用方；LLM 调用由 agent 经
+`traced_chat_completion` 记录。阶段 2 起，本服务还负责装配工具执行器
+（见 docs/specs/us-stage2-agent-tool-loop.md）。
 """
 import asyncio
 import time
 
 from app.agents.chat_agent import ChatAgent
+from app.agents.tool_executor import ToolExecutor
 from app.config.settings import CONTEXT_MAX_CHARS, EMBEDDING_DIMENSION, RETRIEVAL_TOP_K
 from app.db.orm import SessionFactory
 from app.entities import ChatMessage
@@ -30,6 +32,8 @@ from app.schemas.classification_schema import RoutingDecision
 from app.services.chat_session_service import DEFAULT_WORKSPACE_ID, ChatSessionService
 from app.services.embedding_service import EmbeddingService
 from app.services.trace_recorder import TraceRecorder, elapsed_ms
+from app.tools.factory import build_tools
+from app.tools.schemas import RETRIEVAL_TOOL_SCHEMAS
 from app.utils.trace_context import bind_trace, current_trace_id, reset_trace
 
 
@@ -67,6 +71,7 @@ class ChatService:
         self.top_k = top_k
         self.max_chars = max_chars
         self.embedding_dimension = embedding_dimension
+        self._tool_executor: ToolExecutor | None = None
 
     async def answer(self, request: ChatRequest) -> ChatResponse:
         """回答一个问题：先路由（决定策略），再检索，最后生成并落库。
@@ -89,6 +94,8 @@ class ChatService:
                 sources=sources,
                 route=decision,
                 trace_id=trace_id,
+                tool_schemas=RETRIEVAL_TOOL_SCHEMAS,
+                tool_executor=self._get_tool_executor(),
             )
             await asyncio.to_thread(self._persist, request, response)
             return response
@@ -203,6 +210,24 @@ class ChatService:
             duration_ms=duration_ms,
             attributes=dict(attributes),
         )
+
+    def _get_tool_executor(self) -> ToolExecutor:
+        """懒加载工具执行器：三个检索工具接生产（复用同一会话工厂与嵌入服务）。"""
+        if self._tool_executor is None:
+            toolset = build_tools(
+                session_factory=self.session_factory,
+                embedding_service=self._get_embedding_service(),
+                provider=None,
+                embedding_dimension=self.embedding_dimension,
+            )
+            self._tool_executor = ToolExecutor(
+                {
+                    "chunk_search_tool": toolset.chunk_search,
+                    "document_retrieval_tool": toolset.document_retrieval,
+                    "section_context_tool": toolset.section_context,
+                }
+            )
+        return self._tool_executor
 
     def _get_embedding_service(self) -> EmbeddingService:
         """懒加载生产嵌入服务（测试注入假模型，避免触发模型下载）。"""

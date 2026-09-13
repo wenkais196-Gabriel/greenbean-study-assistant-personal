@@ -45,3 +45,26 @@ def test_chat_service_keeps_injected_embedding_service():
     )
 
     assert service._get_embedding_service() is injected
+
+
+def test_chat_service_builds_and_caches_tool_executor(monkeypatch):
+    """工具执行器装配：三个检索工具 + 缓存复用；构建时不开会话、不加载真模型。"""
+    from app.providers.registry import ProviderRegistry
+
+    def fake_embedding_service(dimension: int) -> FakeEmbeddingService:
+        return FakeEmbeddingService(dimension)
+
+    monkeypatch.setattr(chat_service_module, "EmbeddingService", fake_embedding_service)
+    ProviderRegistry.clear()
+
+    service = ChatService(session_factory=lambda: None, embedding_dimension=DIMENSION)
+
+    first = service._get_tool_executor()
+    second = service._get_tool_executor()
+
+    assert first is second
+    assert set(first._tools) == {
+        "chunk_search_tool",
+        "document_retrieval_tool",
+        "section_context_tool",
+    }

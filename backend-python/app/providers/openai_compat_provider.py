@@ -1,7 +1,9 @@
+import json
+
 from openai import AsyncOpenAI
 
 from app.entities.provider_config import ProviderConfig
-from app.providers.base import AIProvider, ChatResult
+from app.providers.base import AIProvider, ChatResult, ToolCall
 
 
 class OpenAICompatibleProvider(AIProvider):
@@ -19,6 +21,7 @@ class OpenAICompatibleProvider(AIProvider):
         temperature: float = 0.3,
         max_tokens: int | None = None,
         response_format: dict | None = None,
+        tools: list[dict] | None = None,
     ) -> ChatResult:
         kwargs = dict(
             model=model or self.config.model_id,
@@ -31,6 +34,8 @@ class OpenAICompatibleProvider(AIProvider):
             kwargs["max_tokens"] = self.config.max_output_tokens
         if response_format is not None:
             kwargs["response_format"] = response_format
+        if tools is not None:
+            kwargs["tools"] = tools
 
         response = await self._client.chat.completions.create(**kwargs)
         choice = response.choices[0]
@@ -44,4 +49,22 @@ class OpenAICompatibleProvider(AIProvider):
             output_tokens=getattr(usage, "completion_tokens", None),
             model=getattr(response, "model", None),
             finish_reason=getattr(choice, "finish_reason", None),
+            tool_calls=_parse_tool_calls(choice),
         )
+
+
+def _parse_tool_calls(choice) -> list[ToolCall] | None:
+    """把 OpenAI 响应里的 tool_calls 解析成 `ToolCall` 列表；没有时为 None。"""
+    raw = getattr(choice.message, "tool_calls", None)
+    if not raw:
+        return None
+
+    parsed: list[ToolCall] = []
+    for item in raw:
+        raw_arguments = getattr(item.function, "arguments", None)
+        try:
+            arguments = json.loads(raw_arguments) if raw_arguments else {}
+        except (json.JSONDecodeError, TypeError):
+            arguments = {}
+        parsed.append(ToolCall(id=item.id, name=item.function.name, arguments=arguments))
+    return parsed

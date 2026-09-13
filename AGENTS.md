@@ -38,8 +38,9 @@ GreenBean Study Assistant 是面向在法国学习的中文学生的 AI 课程�
   `app/tools/factory.py` 的 `build_tools()` 是唯一装配入口；规格
   [`docs/specs/us-stage2-tools-wiring.md`](docs/specs/us-stage2-tools-wiring.md)。
 - `backend-python/app/agents/`：`RouterAgent`（三分类 + 降级，降级与否记在 `degraded`）与 `ChatAgent`
-  **已接真实检索上下文**（由 `ChatService` 注入，不再是 mock）；仍是**单轮编排** ——
-  tool calling / 多步编排待阶段 2。
+  **已接真实检索上下文**（由 `ChatService` 注入，不再是 mock）；阶段 2 起支持**有界工具循环**
+  （模型自主调用检索工具，失败/超时降级直答），规格
+  [`docs/specs/us-stage2-agent-tool-loop.md`](docs/specs/us-stage2-agent-tool-loop.md)。
 - `src/features/workspace/`：三栏界面已接真实问答（`WorkspacePage` → `chatApi` → 后端），
   但**中间的文档正文与左侧文件列表仍是本地 mock** —— 接真数据需要新的"文档单元内容查询"接口（后端暂无）。
 - 可观测性：结构化 trace 已落地（`agent_traces` 表 + `GET /api/traces/{trace_id}`）。
@@ -48,7 +49,8 @@ GreenBean Study Assistant 是面向在法国学习的中文学生的 AI 课程�
 
 闭环规格：`docs/specs/us-stage1-ingest.md`、`us-stage1-chat.md`、`us-stage1-upload-async.md`、`us-stage1-trace.md`、
 `us-stage1-ui-integration.md`（界面接入：前端真实问答 / 会话持久化 / 模型配置）、
-`us-stage2-tools-wiring.md`（Agent 工具接生产对象）。
+`us-stage2-tools-wiring.md`（Agent 工具接生产对象）、
+`us-stage2-agent-tool-loop.md`（Agent 工具循环与降级）。
 
 **生产向量配置（2026-09-12 起）**：`intfloat/multilingual-e5-large`（1024 维，序列上限 512 token）。
 e5 系列要求 query / passage 前缀，由 `settings.EMBEDDING_QUERY_PREFIX` / `EMBEDDING_PASSAGE_PREFIX` 配置；
@@ -110,7 +112,7 @@ e5 系列要求 query / passage 前缀，由 `settings.EMBEDDING_QUERY_PREFIX` /
 - `rag/` 负责页面索引、向量索引、检索、重排和上下文构建。
 - `tools/` 面向 Agent 暴露文档检索、Chunk 搜索、章节上下文、已有分析结果、测验和 Todo 生成能力。
 - `agents/` 负责编排分析、聊天、学习助手和待办生成任务。
-- `providers/` 是 LLM provider 抽象层（`base` / `registry` / `openai_compat_provider`），阶段 2 要在这里扩展 tool calling。
+- `providers/` 是 LLM provider 抽象层（`base` / `registry` / `openai_compat_provider`），已支持 OpenAI function calling 口径的 `tools` / `tool_calls`。
 - `prompts/` 集中维护分析、聊天和 Todo 的提示词模板。
 
 ## 前端与桌面端设计意图

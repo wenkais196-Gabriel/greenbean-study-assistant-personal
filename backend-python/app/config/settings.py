@@ -48,6 +48,19 @@ RETRIEVAL_TOP_K = 20
 # 实测与自算平方 L2 偏差 9.906、与自算欧氏距离偏差 0.000001，设阈值时按这个口径。
 RETRIEVAL_MAX_DISTANCE: float | None = None
 
+# ---- Agent 工具循环 ----
+# 问答 Agent 最多让模型调用几轮工具（每轮可能调用多个工具）。这是硬终止条件：
+# 模型一直要工具也不会无限循环，超限后强制用已有上下文直答（见 docs/specs/us-stage2-agent-tool-loop.md）。
+MAX_TOOL_ROUNDS = 3
+
+# 单个工具调用的执行超时：本地检索是毫秒级，这里只防"工具实现卡死"的异常情况；
+# 超时按执行失败处理 → 降级直答。
+TOOL_TIMEOUT_SECONDS = 10.0
+
+# 工具结果回喂给模型的字符上限（近似）：单个工具结果再长也不会撑爆上下文。
+# 4000 字符 ≈ 950 token（按法文 4.3 字符/token 估），远小于 CONTEXT_MAX_CHARS。
+TOOL_RESULT_MAX_CHARS = 4000
+
 # ---- 上下文组装 ----
 # 进入 LLM 的上下文规模上限（按字符近似）：法文实测约 4.3 字符/token，
 # 8000 字符 ≈ 1900 token，给 8k 上下文窗口的模型留出 query / 历史 / 输出的余量。
