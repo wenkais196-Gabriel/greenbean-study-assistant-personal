@@ -200,6 +200,10 @@ python -m pip install -r requirements-dev.txt
   内存值只在存储不可用时兜底。界面上目前没有"新建会话"入口 —— 要开新会话得清掉这个键。
 - ⚠️ `WorkspacePage` 的测试注意：页面**挂载即拉一次历史**，所以断言不能再拿 `fetchMock.mock.calls[0]`
   当"提问那次调用"，要按 URL / method 找（见 `WorkspacePage.chat.test.tsx` 的 `findAskCall`）。
+- `src/lib/apiClient.ts` 是**唯一的 HTTP 层**：它把 `fetch` 的任何 reject 统一包成 `ApiError`（带 HTTP 状态码，
+  网络不通时 `status = 0`），`upload.ts` 的 `readJob` 也用同一个错误类型。所以调用方拿到的一定是 `Error` ——
+  组件里再写 `e instanceof Error ? e.message : "…"` 时，后半截是**不可达的防御分支**，不必为它硬凑测试；
+  要区分"没配模型(503) / 会话不存在(404) / 后端没起来(0)"读 `ApiError.status` 即可。
 - `eval/` 是评测集的家：改动检索 / 切块 / embedding 模型后应跑一次
   `python eval/run_eval.py --docs-dir "<含 PDF 的语料目录>"`。它走**生产链路**并自带口径自检
   （关键词是否真出现在期望页、no_answer 是否其实有答案）—— 首轮报告正是在这两点上栽过。
