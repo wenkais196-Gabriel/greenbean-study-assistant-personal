@@ -208,6 +208,19 @@ python -m pip install -r requirements-dev.txt
 - 新增表都遵循"纯新增 + `CREATE TABLE IF NOT EXISTS`"：`ingest_jobs`、`agent_traces`；
   `chat_sessions` / `chat_messages` 是上游就建好的表，本批才真正写入。旧库启动时会自动补建；
   换 embedding 模型仍需重建 vec0 索引，这几张表不受影响。
+- ⚠️ **前端发出去的 `api_mode` 必须与后端枚举值逐字一致**（`"openai-compat"`，连字符）。
+  曾写成 `"openai_compat"`（下划线）→ 界面「保存配置」必然 422。两边测试各自都是绿的
+  （后端测 `ApiMode` 枚举值、前端 mock 掉了 `fetch`），契约不一致刚好落在缝里。
+- ⚠️ **`ProviderRegistry` 是进程内单例**：进程重启后它是空的，而 `GET /api/providers/active`
+  读数据库 → 会出现「界面显示已激活、问答却 503」。`app/main.py` 的 `lifespan` 启动时按
+  `is_active` 恢复一次（`ProviderService.restore_active`），别把这段删了。
+- ⚠️ **提示词里的引用记号必须与 `ContextBuilder.render()` 真实写进上下文的一致**（`[来源 N]`）。
+  曾教模型写 `[p.12]`，L2 实测 40 条里只有 14 条带引用 —— 模型被要求用一套记号、上下文里是另一套。
+  改提示词前先看 render 的产物。
+- 后端数据目录是**相对后端 cwd** 的（`settings.DATA_DIR = "data"`，`run_demo.py` 以
+  `backend-python/` 为 cwd 启动）→ 生产库在 `backend-python/data/`。`.gitignore` 里的
+  `data/*.sqlite3` 因带 `/` 被锚定在仓库根、覆盖不到它，所以另加了显式忽略 —— 库里有明文
+  `api_key`，**绝不能提交**。评测脚本要读生产库的 provider 配置，因此用绝对路径定位、不依赖 cwd。
 - ⚠️ **`provider_configs.api_key` 目前是明文存 SQLite**，响应层不返回它（`ProviderConfigResponse` 没有该字段），
   但库里和日志里是明文 —— 自己机器上 demo 可接受，**别把带 key 的 `data/*.db` 提交或外发**。
   加密存储尚未做。

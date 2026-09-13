@@ -34,14 +34,18 @@
 | Agent 工具（`app/tools/`） | 已实现，且**已接生产对象**：`adapters.py`（检索适配 + workspace 过滤）、`factory.py`（统一装配） |
 | Agent 编排（`app/agents/`） | **有界工具循环**：模型自主调用检索工具（`chunk_search` / `document_retrieval` / `section_context`），失败/超时降级直答 |
 | MCP server（`app/mcp_server.py`） | 已实现：6 个工具按 MCP 协议暴露（stdio），`python backend-python/scripts/run_mcp_server.py` 启动 |
-| 生成层评测（L2：引用准确率 / 拒答正确率） | 未做 —— 需要 LLM provider key |
+| 文档查询与工作区接真实数据（`GET /api/documents`、`GET /api/documents/{id}/units`；左侧列表、按页正文、引用点击跳转） | 已实现，有测试覆盖 |
+| 生成层评测（L2：引用准确率 / 拒答正确率 / 工具循环 / 延迟·token） | 已实现：`eval/run_eval_l2.py`，**需要已激活的 provider**（没配就明确报错退出） |
 
 实测基线（本机 Windows / Python 3.12 / Node 24）：
 
-- Python：`506 passed`，覆盖率 `100%`（`fail_under=100` 硬门槛）
-- 前端：`293 passed`（19 个测试文件）
+- Python：`529 passed`，覆盖率 `100%`（`fail_under=100` 硬门槛）
+- 前端：`303 passed`（21 个测试文件）
 - 检索（L1，40 条可评测）：HitRate@5 `90.0%`、@20 `97.5%`、MRR `0.845`
   —— 见 [`docs/eval-report-golden.md`](docs/eval-report-golden.md)、[`eval/README.md`](eval/README.md)
+- 生成（L2，40 条可评测 + 6 条拒答）：答案带 `[来源 N]` **40/40**、引用**文档命中率 89.9%**、
+  **95.0% 的答案至少引对一个标准答案页**、judge 口径拒答正确率 **100%**；端到端延迟 P50 `5.8s` / P95 `10.2s`
+  —— 见 [`docs/eval-report-l2.md`](docs/eval-report-l2.md)
 
 ## 快速开始
 

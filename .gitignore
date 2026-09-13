@@ -89,3 +89,7 @@ planning/
 
 # Local agent tooling workspace
 .reasonix/
+
+# 后端运行时的数据目录（相对后端 cwd）：里面是本地库，可能含明文 api_key —— 绝不提交
+# 上面的 data/*.sqlite3 因为带 "/" 被锚定在仓库根，覆盖不到 backend-python/data/
+backend-python/data/
