@@ -1,3 +1,4 @@
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.db.models import ChatMessageModel
@@ -27,6 +28,27 @@ class ChatMessageRepository:
         model = self.session.get(ChatMessageModel, message_id)
         if model is None:
             return None
+        return self._to_entity(model)
+
+    def list_by_session(self, session_id: str) -> list[ChatMessage]:
+        """按时间升序返回会话内的消息。
+
+        同一轮问答的两条消息时间戳可能落在同一微秒，所以再用 `rowid` 兜底，
+        保证"用户提问在前、助手回答在后"的稳定顺序。
+        """
+        rows = (
+            self.session.execute(
+                select(ChatMessageModel)
+                .where(ChatMessageModel.session_id == session_id)
+                .order_by(ChatMessageModel.created_at, text("rowid"))
+            )
+            .scalars()
+            .all()
+        )
+        return [self._to_entity(row) for row in rows]
+
+    @staticmethod
+    def _to_entity(model: ChatMessageModel) -> ChatMessage:
         return ChatMessage(
             id=model.id,
             session_id=model.session_id,

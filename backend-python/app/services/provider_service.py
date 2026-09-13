@@ -4,6 +4,14 @@ from app.providers.registry import ProviderRegistry
 from app.repositories.provider_config_repository import ProviderConfigRepository
 
 
+class ProviderNameConflictError(ValueError):
+    """同一个 `name` 只能有一份配置。
+
+    数据库上本来就带着唯一约束，这里提前给出**可读**的错误，
+    让 HTTP 层能回 409 而不是把 IntegrityError 变成 500。
+    """
+
+
 class ProviderService:
     def __init__(self, uow: SqlAlchemyUnitOfWork) -> None:
         self.uow = uow
@@ -11,6 +19,10 @@ class ProviderService:
     def create(self, data: dict) -> ProviderConfig:
         with self.uow as uow:
             repo = ProviderConfigRepository(uow.session)
+            name = data.get("name", "")
+            if repo.get_by_name(name) is not None:
+                raise ProviderNameConflictError(f"配置名已存在: {name}")
+
             config = ProviderConfig(**data)
             repo.save(config)
             uow.commit()
@@ -22,6 +34,13 @@ class ProviderService:
             config = repo.get_by_id(config_id)
             if config is None:
                 return None
+
+            new_name = data.get("name")
+            if new_name is not None and new_name != config.name:
+                existing = repo.get_by_name(new_name)
+                if existing is not None and existing.id != config_id:
+                    raise ProviderNameConflictError(f"配置名已存在: {new_name}")
+
             for key, value in data.items():
                 if value is not None:
                     setattr(config, key, value)

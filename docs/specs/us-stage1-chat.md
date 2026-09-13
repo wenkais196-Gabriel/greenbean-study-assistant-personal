@@ -55,7 +55,18 @@ chat_controller   ← HTTP：校验入参、映射错误码
 ## 5. 未做（待办）
 
 1. **`STRUCTURE` 分支**：章节 / 页码级检索还没实现，结构类问题目前也走语义检索；
-2. **会话与消息持久化**：`chat_sessions` / `chat_messages` 表已建好但还没写入（历史仍由前端传）；
-3. **结构化 trace**：route、检索耗时、上下文规模目前只在日志里，没有结构化字段；
-4. **provider 路由注册**：`provider_controller` 是类风格（没有 `APIRouter`），尚未接入 `main.py`；
-5. **引用后校验**：模型输出里的 `[来源 N]` 还没有做存在性校验（防幻觉引用）。
+2. **引用后校验**：模型输出里的 `[来源 N]` 还没有做存在性校验（防幻觉引用）；
+3. **页内跳转**：前端目前只把引用高亮到"来源条目"；要跳到 PDF 的具体页，还需要一层
+   "文档单元内容查询"接口（当前后端没有）。
+
+### 5.1 本批已补（2026-09-13）
+
+| 原待办 | 现在 |
+|---|---|
+| 会话与消息持久化 | ✅ `ChatSessionService`：首次提问自动建会话（标题取首问前 30 字，`workspace_id` 缺省为 `default`）、每轮追加 user / assistant 两条消息（助手那条带 `{"sources": [...]}`）；`GET /api/chat/sessions/{session_id}/messages` 回读（不存在 → 404）；**回答失败不落库** |
+| 结构化 trace | ✅ 见 [`us-stage1-trace.md`](us-stage1-trace.md)（`agent_traces` 表） |
+| provider 路由注册 | ✅ `provider_controller` 改为 `APIRouter` 并注册进 `main.py`（`/api/providers`），另配界面「设置」面板 |
+| 前端接真实问答 | ✅ `src/features/chat/api/chatApi.ts` + `ChatPanel` 来源高亮/错误可见；`usage` 改为后端回传的真实 token（provider 不回传时为 `null`） |
+
+> 会话落库放在**回答成功之后**、且自成事务 —— SQLite 单写者，不能在检索的读事务里写别的表
+> （见 [`us-stage1-trace.md`](us-stage1-trace.md) §3.4 的同类坑）。

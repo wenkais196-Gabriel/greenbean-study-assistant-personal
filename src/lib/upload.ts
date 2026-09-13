@@ -7,7 +7,13 @@
  *
  * 为什么要有这一层：大文档摄取要 1~2 分钟，UI 必须能持续展示"走到哪一步"，
  * 而不是让用户对着一个卡住的转圈猜系统死没死。
+ *
+ * base URL 与 HTTP 错误解析在 `apiClient` 里统一维护，这里 re-export 保持既有调用点不变。
  */
+
+import { ApiError, apiBaseUrl, describeHttpError } from "./apiClient";
+
+export { apiBaseUrl };
 
 export type IngestJobStatus = "queued" | "running" | "succeeded" | "failed";
 export type IngestStage = "parsing" | "embedding" | "persisting";
@@ -43,13 +49,6 @@ export const POLL_INTERVAL_MS = 500;
 /** 等待上限：超时明确报错，不无限轮询下去。 */
 export const POLL_TIMEOUT_MS = 10 * 60 * 1000;
 
-const DEFAULT_API_BASE_URL = "http://127.0.0.1:8000";
-
-/** 后端地址：部署时用 `VITE_API_BASE_URL` 覆盖。 */
-export function apiBaseUrl(): string {
-  return import.meta.env.VITE_API_BASE_URL ?? DEFAULT_API_BASE_URL;
-}
-
 const TERMINAL_STATUSES: readonly IngestJobStatus[] = ["succeeded", "failed"];
 
 /** 是否已经是终态（终态之后不该再轮询）。 */
@@ -70,21 +69,10 @@ export function describeProgress(
   return job.stage ? STAGE_LABELS[job.stage] : "已受理，等待开始";
 }
 
-async function describeHttpError(response: Response): Promise<string> {
-  try {
-    const body = (await response.json()) as { detail?: unknown };
-    if (typeof body.detail === "string" && body.detail) {
-      return body.detail;
-    }
-  } catch {
-    // 响应不是 JSON（网关错误页等）：退回到状态码描述
-  }
-  return `请求失败（HTTP ${response.status}）`;
-}
-
 async function readJob(response: Response): Promise<IngestJob> {
   if (!response.ok) {
-    throw new Error(await describeHttpError(response));
+    // 与 apiClient 保持一致：错误带上 HTTP 状态码，调用方才能按 4xx / 5xx 分档
+    throw new ApiError(await describeHttpError(response), response.status);
   }
   const envelope = (await response.json()) as { data: IngestJob };
   return envelope.data;

@@ -5,9 +5,16 @@ import FileManager from "../components/left/FileManager";
 import DocumentViewer from "../components/center/DocumentViewer";
 import ChatPanel from "../components/right/ChatPanel";
 import ResizableHandle from "../components/shared/ResizableHandle";
+import ProviderPanel from "../../provider/components/ProviderPanel";
 import type { WorkspaceState, WorkspaceAction, WorkspacePageProps, TextFormatAction } from "../type";
 import type { SectionNode, ContentBlock, ContentLine, FootnoteReference } from "../../../types/section";
 import type { ChatMessage } from "../../../types/chat";
+import { ApiError } from "../../../lib/apiClient";
+import { askQuestion, fetchSessionMessages, DEFAULT_WORKSPACE_ID } from "../../chat/api/chatApi";
+import { getOrCreateSessionId } from "../../chat/sessionStore";
+
+/** 随请求带给后端的历史消息条数：够维持指代，又不至于把 prompt 撑爆。 */
+const MAX_HISTORY_MESSAGES = 8;
 
 function getLocalizedSections(): SectionNode[] {
   return [
@@ -115,6 +122,9 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
       const assistantMsg: ChatMessage = { id: `msg-${Date.now() + 1}`, role: "assistant", content: state.quotedText ? `针对你引用的内容「${state.quotedText.substring(0, 30)}...」回答如下：\n\n这是结合上下文的模拟回复。` : `这是对「${state.chatInput}」的模拟回复。`, createdAt: new Date().toISOString() };
       return { ...state, chatMessages: [...state.chatMessages, userMsg, assistantMsg], chatInput: "", quotedText: null, tokenUsage: state.tokenUsage + 150 };
     }
+    case "APPEND_CHAT_MESSAGE": return { ...state, chatMessages: [...state.chatMessages, action.message] };
+    case "SET_CHAT_MESSAGES": return { ...state, chatMessages: action.messages };
+    case "ADD_TOKEN_USAGE": return { ...state, tokenUsage: state.tokenUsage + action.usage };
     case "SET_LOADING": return { ...state, loading: action.loading };
     case "SET_TOKEN_USAGE": return { ...state, tokenUsage: action.usage };
     case "TOGGLE_LEFT_PANEL": return { ...state, leftCollapsed: !state.leftCollapsed };
@@ -129,7 +139,7 @@ export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction)
   }
 }
 
-function WorkspacePage(_props: WorkspacePageProps) {
+function WorkspacePage({ workspaceId = DEFAULT_WORKSPACE_ID }: WorkspacePageProps) {
   const titleRef = useRef<HTMLInputElement>(null);
   const rightDragRef = useRef(false);
   const rightWidthRef = useRef(302);
@@ -138,6 +148,11 @@ function WorkspacePage(_props: WorkspacePageProps) {
   const [leftMode, setLeftMode] = useState<"files" | "sections" | null>("files");
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
   const [selectedFileName, setSelectedFileName] = useState<string>("");
+  const [chatError, setChatError] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  // 会话 ID：存在本地，刷新后复用同一个（否则每次都算新会话，后端历史永远拉不到）。
+  // `useState` 的惰性初始化保证只生成/读取一次。
+  const [sessionId] = useState(() => getOrCreateSessionId());
 
   const [state, dispatch] = useReducer(workspaceReducer, {
     sections: getLocalizedSections(), selectedSectionId: null, contentBlocks: getLocalizedContent(),
@@ -161,7 +176,78 @@ function WorkspacePage(_props: WorkspacePageProps) {
   const qs = useCallback(() => dispatch({ type: "QUOTE_SELECTION" } as any), []);
   const ci = useCallback((t: string) => dispatch({ type: "SET_CHAT_INPUT", text: t } as any), []);
   const cq = useCallback(() => dispatch({ type: "CLEAR_QUOTE" } as any), []);
-  const send = useCallback(() => { if ((state.chatInput.trim() || state.quotedText) && !state.loading) dispatch({ type: "SEND_CHAT_MESSAGE", message: {} as ChatMessage } as any); }, [state.chatInput, state.quotedText, state.loading]);
+
+  /**
+   * 打开工作区时恢复上次对话。
+   *
+   * 会话 ID 来自本地存储，历史在后端 —— 后端落库（C2）只有配上这一步，刷新后才真的"还在"。
+   * 404 表示这个会话还没落过库（首次打开，或换了新 ID），当作"没有历史"而不是错误。
+   */
+  useEffect(() => {
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const history = await fetchSessionMessages(sessionId);
+        if (!cancelled && history.length > 0) {
+          dispatch({ type: "SET_CHAT_MESSAGES", messages: history });
+        }
+      } catch (error) {
+        if (cancelled || (error instanceof ApiError && error.status === 404)) return;
+        setChatError(error instanceof Error ? error.message : "加载历史对话失败");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId]);
+
+  /**
+   * 提问：先乐观追加用户消息，再调后端（检索 + 生成），最后追加带来源的助手消息。
+   *
+   * 失败必须可见：503 是"还没配模型"、status 0 是"后端没起来"，两种都要让用户看到，
+   * 而不是留一个转圈或一条假装成功的回复（真实链路取代了原来的本地模拟回复）。
+   */
+  const send = useCallback(async () => {
+    const query = state.chatInput.trim();
+    if ((!query && !state.quotedText) || state.loading) return;
+
+    // 引用的原文一起送过去：检索与回答都要用到这段上下文
+    const requestText = state.quotedText ? `[引用] ${state.quotedText}\n\n${query}` : query;
+
+    dispatch({ type: "APPEND_CHAT_MESSAGE", message: {
+      id: `msg-${Date.now()}-user`, role: "user", content: requestText, createdAt: new Date().toISOString(),
+    }});
+    dispatch({ type: "SET_CHAT_INPUT", text: "" });
+    dispatch({ type: "CLEAR_QUOTE" });
+    dispatch({ type: "SET_LOADING", loading: true });
+    setChatError(null);
+
+    try {
+      const result = await askQuestion({
+        sessionId,
+        query: requestText,
+        workspaceId,
+        history: state.chatMessages
+          .slice(-MAX_HISTORY_MESSAGES)
+          .map((msg) => ({ role: msg.role, content: msg.content })),
+      });
+
+      dispatch({ type: "APPEND_CHAT_MESSAGE", message: {
+        id: `msg-${Date.now()}-answer`, role: "assistant", content: result.answer,
+        createdAt: new Date().toISOString(), sources: result.sources,
+      }});
+
+      const tokens = (result.usage?.inputTokens ?? 0) + (result.usage?.outputTokens ?? 0);
+      if (tokens > 0) dispatch({ type: "ADD_TOKEN_USAGE", usage: tokens });
+    } catch (error) {
+      setChatError(error instanceof Error ? error.message : "提问失败，请稍后重试");
+    } finally {
+      dispatch({ type: "SET_LOADING", loading: false });
+    }
+  }, [state.chatInput, state.quotedText, state.loading, state.chatMessages, workspaceId, sessionId]);
+
   const setLeftW = useCallback((d: number) => dispatch({ type: "SET_LEFT_WIDTH", width: state.leftPanelWidth + d } as any), [state.leftPanelWidth]);
 
   const setRightW = useCallback((d: number, clientX?: number) => {
@@ -278,7 +364,8 @@ function WorkspacePage(_props: WorkspacePageProps) {
               </svg>
             </button>
             <div className="flex-1" />
-            <button className="cursor-pointer w-9 h-9 rounded-lg flex items-center justify-center text-neutral-400 hover:bg-black/10 transition-all" title="设置">
+            <button onClick={() => setShowSettings(true)}
+              className="cursor-pointer w-9 h-9 rounded-lg flex items-center justify-center text-neutral-400 hover:bg-black/10 transition-all" title="设置">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
               </svg>
@@ -332,11 +419,13 @@ function WorkspacePage(_props: WorkspacePageProps) {
           {!state.rightCollapsed && (
             <div style={{ width: state.rightPanelWidth, maxWidth: "100%" }} className="h-full overflow-hidden relative">
               <ChatPanel messages={state.chatMessages} input={state.chatInput} quotedText={state.quotedText} tokenUsage={state.tokenUsage}
-                onInputChange={ci} onSend={send} onClearQuote={cq} loading={state.loading} />
+                onInputChange={ci} onSend={send} onClearQuote={cq} loading={state.loading} error={chatError} />
             </div>
           )}
         </motion.aside>
       </div>
+
+      {showSettings && <ProviderPanel onClose={() => setShowSettings(false)} />}
     </motion.div>
   );
 }

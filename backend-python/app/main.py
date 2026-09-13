@@ -2,7 +2,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import chat_controller, document_controller, trace_controller
+from app.api import (
+    chat_controller,
+    document_controller,
+    provider_controller,
+    trace_controller,
+)
 from app.config.settings import CORS_ALLOWED_ORIGINS
 
 app = FastAPI(title="Greenbean Study Assistant API")
@@ -24,3 +29,6 @@ app.include_router(chat_controller.router, prefix="/api")
 
 # 注册结构化 trace 的查询路由（GET /api/traces/{trace_id}）
 app.include_router(trace_controller.router, prefix="/api")
+
+# 注册模型配置路由（/api/providers）：没有它，界面就没有任何办法激活一个模型
+app.include_router(provider_controller.router, prefix="/api")

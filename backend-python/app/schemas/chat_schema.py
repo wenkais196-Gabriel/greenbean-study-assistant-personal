@@ -19,6 +19,20 @@ class ChatRequest(BaseModel):
     query: str = Field(..., description="用户当前提出的问题。")
     history: list[HistoryMessage] = Field(default_factory=list, description="对话历史记录。")
     use_extended_context: bool = Field(default=False, description="是否包含小节解析和历史摘要上下文。")
+    workspace_id: str | None = Field(
+        default=None,
+        description="会话归属的工作区；留空时由后端归入默认工作区。",
+    )
+
+
+class ChatUsage(BaseModel):
+    """一次回答的 token 用量；provider 回传才拿得到，拿不到时字段为 None。
+
+    口径：只统计**回答**那次 LLM 调用。路由那次是内部决策开销，别的账去算。
+    """
+
+    input_tokens: int | None = Field(default=None, description="输入 token 数（prompt）。")
+    output_tokens: int | None = Field(default=None, description="输出 token 数（completion）。")
 
 
 class ChatResponse(BaseModel):
@@ -28,6 +42,10 @@ class ChatResponse(BaseModel):
     trace_id: str | None = Field(
         default=None,
         description="本次链路的追踪 ID，可用 GET /api/traces/{trace_id} 取回全部 span。",
+    )
+    usage: ChatUsage | None = Field(
+        default=None,
+        description="回答那次 LLM 调用的 token 用量；provider 不回传时为 null。",
     )
 
 

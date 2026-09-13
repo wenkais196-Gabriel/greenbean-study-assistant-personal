@@ -5,7 +5,7 @@ import pytest
 from app.enums.api_mode import ApiMode
 from app.providers.registry import ProviderRegistry
 from app.repositories.provider_config_repository import ProviderConfigRepository
-from app.services.provider_service import ProviderService
+from app.services.provider_service import ProviderNameConflictError, ProviderService
 
 
 class TestProviderService:
@@ -25,18 +25,38 @@ class TestProviderService:
 
     def test_create(self, mock_uow):
         service = ProviderService(uow=mock_uow)
-        result = service.create(
-            {
-                "name": "new-cfg",
-                "api_mode": ApiMode.OPENAI_COMPAT,
-                "api_key": "sk-new",
-                "api_host": "https://api.new.com",
-                "model_id": "new-model",
-                "display_name": "New",
-            }
-        )
+        # 名字未被占用：`get_by_name` 返回 None 才走得下去
+        with patch.object(ProviderConfigRepository, "get_by_name", return_value=None):
+            result = service.create(
+                {
+                    "name": "new-cfg",
+                    "api_mode": ApiMode.OPENAI_COMPAT,
+                    "api_key": "sk-new",
+                    "api_host": "https://api.new.com",
+                    "model_id": "new-model",
+                    "display_name": "New",
+                }
+            )
         assert result.name == "new-cfg"
         mock_uow.commit.assert_called_once()
+
+    def test_create_duplicate_name_raises(self, mock_uow, provider_config_factory):
+        """重名必须在写库之前拦下来（否则数据库唯一约束会变成 500）。"""
+        existing = provider_config_factory(name="new-cfg")
+        service = ProviderService(uow=mock_uow)
+        with patch.object(ProviderConfigRepository, "get_by_name", return_value=existing):
+            with pytest.raises(ProviderNameConflictError, match="new-cfg"):
+                service.create(
+                    {
+                        "name": "new-cfg",
+                        "api_mode": ApiMode.OPENAI_COMPAT,
+                        "api_key": "sk-new",
+                        "api_host": "https://api.new.com",
+                        "model_id": "new-model",
+                        "display_name": "New",
+                    }
+                )
+        mock_uow.commit.assert_not_called()
 
     def test_get_by_id(self, mock_uow, provider_config_factory):
         with patch.object(
@@ -90,12 +110,35 @@ class TestProviderService:
     def test_update(self, mock_uow, provider_config_factory):
         config = provider_config_factory(name="original")
         with patch.object(ProviderConfigRepository, "get_by_id", return_value=config):
-            with patch.object(ProviderConfigRepository, "save"):
-                result = ProviderService(uow=mock_uow).update(
-                    config.id, {"name": "updated"}
-                )
-                assert result.name == "updated"
-                mock_uow.commit.assert_called_once()
+            # 改名时才会查重；查出来没人占用
+            with patch.object(ProviderConfigRepository, "get_by_name", return_value=None):
+                with patch.object(ProviderConfigRepository, "save"):
+                    result = ProviderService(uow=mock_uow).update(
+                        config.id, {"name": "updated"}
+                    )
+                    assert result.name == "updated"
+                    mock_uow.commit.assert_called_once()
+
+    def test_update_to_taken_name_raises(self, mock_uow, provider_config_factory):
+        """改名撞上别人的名字：抛冲突，不落库。"""
+        config = provider_config_factory(name="original")
+        other = provider_config_factory(name="taken")
+        with patch.object(ProviderConfigRepository, "get_by_id", return_value=config):
+            with patch.object(ProviderConfigRepository, "get_by_name", return_value=other):
+                with pytest.raises(ProviderNameConflictError, match="taken"):
+                    ProviderService(uow=mock_uow).update(config.id, {"name": "taken"})
+        mock_uow.commit.assert_not_called()
+
+    def test_update_keeping_own_name_is_not_a_conflict(self, mock_uow, provider_config_factory):
+        """改成自己原来的名字（大小写/内容相同）不该算冲突。"""
+        config = provider_config_factory(name="original")
+        with patch.object(ProviderConfigRepository, "get_by_id", return_value=config):
+            with patch.object(ProviderConfigRepository, "get_by_name", return_value=config):
+                with patch.object(ProviderConfigRepository, "save"):
+                    result = ProviderService(uow=mock_uow).update(
+                        config.id, {"name": "original", "display_name": "Renamed"}
+                    )
+        assert result.display_name == "Renamed"
 
     def test_update_nonexistent(self, mock_uow):
         with patch.object(ProviderConfigRepository, "get_by_id", return_value=None):

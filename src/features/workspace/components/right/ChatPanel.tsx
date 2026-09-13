@@ -1,4 +1,4 @@
-import { useRef, useEffect, type KeyboardEvent } from "react";
+import { useRef, useEffect, useState, type KeyboardEvent } from "react";
 import type { ChatPanelProps } from "../../type";
 
 /** AI logo */
@@ -52,9 +52,11 @@ function QuoteBar({ text, onClear }: { text: string; onClear: () => void }) {
 }
 
 /** 右侧 AI 聊天面板组件 */
-function ChatPanel({ messages, input, quotedText, tokenUsage, onInputChange, onSend, onClearQuote, loading }: ChatPanelProps) {
+function ChatPanel({ messages, input, quotedText, tokenUsage, onInputChange, onSend, onClearQuote, loading, error }: ChatPanelProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  // 当前高亮的来源条目（messageId + 下标）；再点一次取消高亮
+  const [activeSource, setActiveSource] = useState<{ messageId: string; index: number } | null>(null);
 
   useEffect(() => {
     try { messagesEndRef.current?.scrollIntoView?.({ behavior: "smooth" }); } catch { /* noop */ }
@@ -98,6 +100,25 @@ function ChatPanel({ messages, input, quotedText, tokenUsage, onInputChange, onS
                   : "bg-black/5 text-neutral-700 rounded-bl-md"
               }`}>
                 <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                {msg.sources && msg.sources.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    {msg.sources.map((source, index) => {
+                      const active = activeSource?.messageId === msg.id && activeSource.index === index;
+                      return (
+                        <button key={`${msg.id}-source-${index}`} type="button" aria-pressed={active}
+                          onClick={() => setActiveSource(active ? null : { messageId: msg.id, index })}
+                          title={source.headingPath?.join(" / ") ?? undefined}
+                          className={`text-[10px] px-1.5 py-0.5 rounded-md border transition-colors cursor-pointer ${
+                            active
+                              ? "bg-blue-500 text-white border-blue-500"
+                              : "bg-white/70 text-neutral-500 border-black/10 hover:bg-blue-50"
+                          }`}>
+                          来源 {index + 1} · {source.pageNumber != null ? `第 ${source.pageNumber} 页` : source.documentId}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
                 <div className={`flex items-center justify-between mt-1 ${msg.role === "user" ? "text-white/50" : "text-neutral-400"}`}>
                   <span className="text-[10px]">{new Date(msg.createdAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}</span>
                   {msg.role === "assistant" && <span className="text-[9px] opacity-60">AI</span>}
@@ -111,6 +132,11 @@ function ChatPanel({ messages, input, quotedText, tokenUsage, onInputChange, onS
 
       {/* 输入区域 - 固定在底部 */}
       <div className="flex-shrink-0 border-t border-black/5 bg-white/50 px-3 py-2.5">
+        {error && (
+          <div role="alert" className="mb-2 px-2.5 py-1.5 rounded-xl bg-red-50 border border-red-200 text-[11px] text-red-600 leading-relaxed break-words">
+            {error}
+          </div>
+        )}
         {quotedText && <div className="mb-2"><QuoteBar text={quotedText} onClear={onClearQuote} /></div>}
         <div className="flex items-center gap-2 bg-black/5 rounded-2xl px-3 py-2 focus-within:ring-2 focus-within:ring-blue-500/30 transition-all duration-200">
           <textarea ref={inputRef} value={input} onChange={(e) => onInputChange(e.target.value)} onKeyDown={handleKeyDown}

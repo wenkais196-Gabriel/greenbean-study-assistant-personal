@@ -119,3 +119,65 @@ describe("ChatPanel", () => {
     expect(pulseDots.length).toBeGreaterThanOrEqual(1);
   });
 });
+
+/** 带检索来源的助手消息：回答要能回溯到具体页码。 */
+const sourcedMessages: ChatMessage[] = [
+  {
+    id: "msg-ask",
+    role: "user",
+    content: "什么是监督学习",
+    createdAt: "2025-12-01T10:00:00Z",
+  },
+  {
+    id: "msg-answer",
+    role: "assistant",
+    content: "监督学习是用带标签的数据训练模型。",
+    createdAt: "2025-12-01T10:00:05Z",
+    sources: [
+      { chunkId: "c1", documentId: "doc-1", pageNumber: 12, headingPath: ["第二章"], distance: 0.31 },
+      { chunkId: "c2", documentId: "doc-1", pageNumber: 3, headingPath: null, distance: 0.44 },
+    ],
+  },
+];
+
+describe("ChatPanel 来源与错误", () => {
+  it("助手消息的来源渲染为带页码的条目", () => {
+    render(<ChatPanel {...defaultProps} messages={sourcedMessages} />);
+
+    expect(screen.getByText(/第 12 页/)).toBeDefined();
+    expect(screen.getByText(/第 3 页/)).toBeDefined();
+  });
+
+  it("点击来源条目标记为选中（高亮）", () => {
+    render(<ChatPanel {...defaultProps} messages={sourcedMessages} />);
+
+    const first = screen.getByRole("button", { name: /第 12 页/ });
+    expect(first.getAttribute("aria-pressed")).toBe("false");
+
+    fireEvent.click(first);
+
+    expect(
+      screen.getByRole("button", { name: /第 12 页/ }).getAttribute("aria-pressed"),
+    ).toBe("true");
+  });
+
+  it("没有来源时不渲染来源区", () => {
+    render(<ChatPanel {...defaultProps} messages={sampleMessages} />);
+
+    expect(screen.queryByRole("button", { name: /第 \d+ 页/ })).toBeNull();
+    expect(screen.queryByText(/来源/)).toBeNull();
+  });
+
+  it("显示后端错误提示而非静默失败", () => {
+    render(<ChatPanel {...defaultProps} error="尚未配置可用的模型 provider" />);
+
+    expect(screen.getByRole("alert")).toBeDefined();
+    expect(screen.getByText(/尚未配置可用的模型 provider/)).toBeDefined();
+  });
+
+  it("无错误时不渲染错误条", () => {
+    render(<ChatPanel {...defaultProps} error={null} />);
+
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+});

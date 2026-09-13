@@ -36,7 +36,14 @@ export type WorkspaceAction =
   | { type: "QUOTE_SELECTION" }
   | { type: "CLEAR_QUOTE" }
   | { type: "SET_CHAT_INPUT"; text: string }
+  /** 本地模拟回复（离线开发用）；真实链路走下面两个 action */
   | { type: "SEND_CHAT_MESSAGE"; message: ChatMessage }
+  /** 追加一条消息（真实问答链路：先追加用户提问，拿到回答后再追加助手消息） */
+  | { type: "APPEND_CHAT_MESSAGE"; message: ChatMessage }
+  /** 用回读到的历史替换消息列表（打开工作区时恢复上次对话） */
+  | { type: "SET_CHAT_MESSAGES"; messages: ChatMessage[] }
+  /** 累加真实 token 用量（后端 provider 回传时才有） */
+  | { type: "ADD_TOKEN_USAGE"; usage: number }
   | { type: "SET_LOADING"; loading: boolean }
   | { type: "SET_TOKEN_USAGE"; usage: number }
   | { type: "TOGGLE_LEFT_PANEL" }
@@ -79,6 +86,8 @@ export interface ChatPanelProps {
   onSend: () => void;
   onClearQuote: () => void;
   loading: boolean;
+  /** 后端返回的错误文案（如"尚未配置可用的模型"）；为空表示没有错误 */
+  error?: string | null;
 }
 
 export interface WorkspacePageProps {

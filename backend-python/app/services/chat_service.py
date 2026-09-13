@@ -2,7 +2,7 @@
 聊天服务：把"提问"接到检索链路，产出带来源的上下文，再交给 `ChatAgent` 生成回答。
 
 分层（与既有 spec 一致）：
-- 本服务负责**同步**基础设施：检索与上下文组装（sqlite + 本地嵌入）；
+- 本服务负责**同步**基础设施：检索、上下文组装（sqlite + 本地嵌入）与**落库**；
 - `ChatAgent` 只负责路由与 LLM 编排，不碰持久化。
 
 检索与 query 嵌入是同步阻塞的（本地查询毫秒级、嵌入约 30 ms），统一用
@@ -18,6 +18,7 @@ import time
 from app.agents.chat_agent import ChatAgent
 from app.config.settings import CONTEXT_MAX_CHARS, EMBEDDING_DIMENSION, RETRIEVAL_TOP_K
 from app.db.orm import SessionFactory
+from app.entities import ChatMessage
 from app.enums.route_types import RouteType
 from app.rag.context_builder import ContextBuilder
 from app.rag.retriever import Retriever
@@ -26,13 +27,14 @@ from app.repositories.document_unit_repository import DocumentUnitRepository
 from app.repositories.embedding_repository import EmbeddingRepository
 from app.schemas.chat_schema import ChatRequest, ChatResponse
 from app.schemas.classification_schema import RoutingDecision
+from app.services.chat_session_service import DEFAULT_WORKSPACE_ID, ChatSessionService
 from app.services.embedding_service import EmbeddingService
 from app.services.trace_recorder import TraceRecorder, elapsed_ms
 from app.utils.trace_context import bind_trace, current_trace_id, reset_trace
 
 
 class ChatService:
-    """提问 → 检索 → 组装上下文 → 生成带来源的回答。"""
+    """提问 → 检索 → 组装上下文 → 生成带来源的回答 → 落库。"""
 
     def __init__(
         self,
@@ -40,6 +42,7 @@ class ChatService:
         session_factory: SessionFactory,
         agent: ChatAgent | None = None,
         embedding_service: EmbeddingService | None = None,
+        session_service: ChatSessionService | None = None,
         top_k: int = RETRIEVAL_TOP_K,
         max_chars: int = CONTEXT_MAX_CHARS,
         embedding_dimension: int = EMBEDDING_DIMENSION,
@@ -49,6 +52,7 @@ class ChatService:
         :param session_factory: 会话工厂（生产走 app/db/runtime，测试注入临时库）
         :param agent: 聊天 Agent，默认 `ChatAgent()`（会拿到同一个 trace recorder）
         :param embedding_service: 嵌入服务，默认懒加载生产配置（**测试请注入假模型**）
+        :param session_service: 会话落库服务，默认用同一个 `session_factory` 构造（构造时不碰磁盘）
         :param top_k: 基础召回深度
         :param max_chars: 上下文预算（见 `ContextBuilder.build_within_budget`）
         :param trace_recorder: 结构化 trace 记录器；`None` 表示不记录（trace 关闭时传 None）
@@ -57,15 +61,21 @@ class ChatService:
         self.trace_recorder = trace_recorder
         self.agent = agent or ChatAgent(trace_recorder=trace_recorder)
         self.embedding_service = embedding_service
+        self.session_service = session_service or ChatSessionService(
+            session_factory=session_factory
+        )
         self.top_k = top_k
         self.max_chars = max_chars
         self.embedding_dimension = embedding_dimension
 
     async def answer(self, request: ChatRequest) -> ChatResponse:
-        """回答一个问题：先路由（决定策略），再检索，最后生成。
+        """回答一个问题：先路由（决定策略），再检索，最后生成并落库。
 
         整个链路的 span 共享同一个 `trace_id`（存在 contextvar 里），
         并回填到响应的 `trace_id` 上供调用方取回全貌（AC2）。
+
+        ⚠️ 落库放在**回答成功之后**、且自成事务：SQLite 单写者，不能在检索的读事务里写别的表。
+        提问失败（如 provider 未配置）时不落库，历史里不会留下半截会话。
         """
         token = bind_trace()
         try:
@@ -73,15 +83,31 @@ class ChatService:
             decision = await self._route(request.query)
             depth = self._retrieval_depth(decision.route, request.use_extended_context)
             context, sources = await asyncio.to_thread(self._retrieve, request.query, depth)
-            return await self.agent.generate_response(
+            response = await self.agent.generate_response(
                 request,
                 context=context,
                 sources=sources,
                 route=decision,
                 trace_id=trace_id,
             )
+            await asyncio.to_thread(self._persist, request, response)
+            return response
         finally:
             reset_trace(token)
+
+    def list_session_messages(self, session_id: str) -> list[ChatMessage] | None:
+        """回读会话历史；会话不存在时返回 `None`。"""
+        return self.session_service.list_messages(session_id)
+
+    def _persist(self, request: ChatRequest, response: ChatResponse) -> None:
+        """同步落库（在线程池里执行）。"""
+        self.session_service.append_turn(
+            session_id=request.session_id,
+            workspace_id=request.workspace_id or DEFAULT_WORKSPACE_ID,
+            query=request.query,
+            answer=response.answer,
+            source_context=response.source_context or [],
+        )
 
     async def _route(self, query: str) -> RoutingDecision:
         """路由 + 记录 `agent.route` span。

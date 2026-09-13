@@ -12,8 +12,9 @@
 """
 from app.agents.classification_agent import RouterAgent
 from app.prompts.chat_prompts import CHAT_SYSTEM_PROMPT, CHAT_USER_PROMPT_TPL
+from app.providers.base import ChatResult
 from app.providers.registry import ProviderRegistry
-from app.schemas.chat_schema import ChatRequest, ChatResponse
+from app.schemas.chat_schema import ChatRequest, ChatResponse, ChatUsage
 from app.schemas.classification_schema import RoutingDecision
 from app.services.llm_trace import traced_chat_completion
 from app.services.trace_recorder import TraceRecorder
@@ -66,10 +67,20 @@ class ChatAgent:
             temperature=0.3,
         )
 
-        answer = response.content
         return ChatResponse(
             session_id=request.session_id,
-            answer=answer,
+            answer=response.content,
             source_context=sources,
             trace_id=trace_id,
+            usage=self._usage(response),
+        )
+
+    @staticmethod
+    def _usage(response: ChatResult) -> ChatUsage | None:
+        """把 provider 的用量搬进响应；一个都没回传时给 None，不编数字。"""
+        if response.input_tokens is None and response.output_tokens is None:
+            return None
+        return ChatUsage(
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
         )
