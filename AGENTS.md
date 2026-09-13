@@ -147,6 +147,20 @@ L1 检索评测（走生产链路，零 LLM 成本；需要指定含 PDF 的语�
 python eval/run_eval.py --docs-dir "<语料目录>" --out docs/eval-report-golden.md
 ```
 
+CI 门禁（小型冒烟集，每 push 也跑这条）：
+
+```bash
+python eval/run_eval.py --docs-dir eval/fixtures/pdf \
+  --golden-set eval/golden_set_ci.jsonl --gate-hit-rate-5 0.6
+```
+
+运行 demo / MCP server：
+
+```bash
+python scripts/run_demo.py            # 一键起前后端（demo）
+python backend-python/scripts/run_mcp_server.py   # 六个工具按 MCP 协议暴露（stdio）
+```
+
 Python 依赖安装：
 
 ```bash

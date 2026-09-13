@@ -15,8 +15,12 @@ function createTestState(): WorkspaceState {
   };
 }
 
-// Mock framer-motion
+// Mock framer-motion。
+// ⚠️ 组件类型必须**缓存**：如果每次访问 `motion.div` 都新建一个组件函数，
+// React 会认为组件类型变了 → 卸载并重建整棵子树（见 AGENTS.md 注意事项）。
 vi.mock("framer-motion", () => {
+  const cache = new Map<string, unknown>();
+
   const createMotionComponent = (tag: string) => {
     const Component = (props: Record<string, unknown>) => {
       const { children, ...rest } = props;
@@ -33,7 +37,12 @@ vi.mock("framer-motion", () => {
   return {
     motion: new Proxy(
       {},
-      { get: (_target, tag: string) => createMotionComponent(tag) },
+      {
+        get: (_target, tag: string) => {
+          if (!cache.has(tag)) cache.set(tag, createMotionComponent(tag));
+          return cache.get(tag);
+        },
+      },
     ),
     AnimatePresence: ({ children }: { children: React.ReactNode }) => React.createElement(React.Fragment, null, children),
   };

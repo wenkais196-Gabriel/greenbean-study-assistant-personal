@@ -75,6 +75,19 @@ npm run test:python:coverage
 
 > 图片 OCR 解析器的测试使用 mock，**不需要**本机安装 Tesseract 引擎。
 
+## 运行
+
+```bash
+# 一键起前后端（demo）
+python scripts/run_demo.py            # 前端 http://localhost:5173 / 后端 http://127.0.0.1:8000
+python scripts/run_demo.py --check    # 只打印要执行的命令，不真正启动
+
+# 把六个工具按 MCP 协议暴露（stdio server，可被 Claude Desktop / Cursor 调用）
+python backend-python/scripts/run_mcp_server.py
+```
+
+> demo 问答需要在界面「设置」里配置并激活一个模型 provider（`api_key` 只存本地，不会回传前端）。
+
 ## 技术栈
 
 - 前端：React 19、TypeScript、Vite 7、Vitest、Testing Library
