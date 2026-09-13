@@ -6,7 +6,7 @@ import { activateProvider, createProvider, listProviders, type ProviderConfig } 
 const config: ProviderConfig = {
   id: "p-1",
   name: "deepseek",
-  api_mode: "openai_compat",
+  api_mode: "openai-compat",
   api_host: "https://api.deepseek.com",
   api_path: "/v1/chat/completions",
   model_id: "deepseek-chat",
@@ -68,7 +68,7 @@ describe("providerApi", () => {
     expect(JSON.parse(init.body as string)).toMatchObject({
       name: "deepseek",
       api_key: "sk-x",
-      api_mode: "openai_compat",
+      api_mode: "openai-compat",
       api_path: "/v1/chat/completions",
       model_id: "deepseek-chat",
     });

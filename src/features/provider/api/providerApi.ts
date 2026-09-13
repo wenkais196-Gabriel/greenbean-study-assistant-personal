@@ -42,7 +42,7 @@ export interface ProviderDraft {
 }
 
 /** 与后端 `ProviderConfigCreateRequest` 的默认值保持一致。 */
-export const DEFAULT_API_MODE = "openai_compat";
+export const DEFAULT_API_MODE = "openai-compat";
 export const DEFAULT_API_PATH = "/v1/chat/completions";
 export const DEFAULT_CONTEXT_WINDOW = 65536;
 export const DEFAULT_MAX_OUTPUT_TOKENS = 8192;

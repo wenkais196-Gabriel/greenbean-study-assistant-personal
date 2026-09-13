@@ -158,6 +158,23 @@ class TestProviderService:
                 assert result.display_name == "Updated"
                 MockRegistry.activate.assert_called_once_with(config)
 
+    @patch("app.services.provider_service.ProviderRegistry")
+    def test_restore_active_activates_stored_config(
+        self, MockRegistry, mock_uow, provider_config_factory
+    ):
+        """进程重启后注册表是空的：启动时按库里的 is_active 重新装回去。"""
+        config = provider_config_factory(is_active=True)
+        with patch.object(ProviderConfigRepository, "get_active", return_value=config):
+            restored = ProviderService(uow=mock_uow).restore_active()
+
+        assert restored is config
+        MockRegistry.activate.assert_called_once_with(config)
+
+    def test_restore_active_without_config_leaves_registry_alone(self, mock_uow):
+        """库里没有激活配置时什么都不做（也不该抛错把启动搞崩）。"""
+        with patch.object(ProviderConfigRepository, "get_active", return_value=None):
+            assert ProviderService(uow=mock_uow).restore_active() is None
+
     def test_get_active(self, mock_uow, provider_config_factory):
         config = provider_config_factory(is_active=True)
         with patch.object(ProviderConfigRepository, "get_active", return_value=config):

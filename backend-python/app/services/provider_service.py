@@ -70,6 +70,18 @@ class ProviderService:
             repo = ProviderConfigRepository(uow.session)
             return repo.get_active()
 
+    def restore_active(self) -> ProviderConfig | None:
+        """把库里标记为"当前激活"的配置重新装进 `ProviderRegistry`。
+
+        `ProviderRegistry` 是**进程内**单例：进程重启后它是空的，而
+        `GET /api/providers/active` 读的是数据库 —— 两边会不一致
+        （界面显示"已激活"，实际问答回 503）。启动时恢复一次即可对齐。
+        """
+        config = self.get_active()
+        if config is not None:
+            ProviderRegistry.activate(config)
+        return config
+
     def get_by_id(self, config_id: str) -> ProviderConfig | None:
         with self.uow as uow:
             repo = ProviderConfigRepository(uow.session)
