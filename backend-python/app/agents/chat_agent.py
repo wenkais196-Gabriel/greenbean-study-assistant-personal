@@ -64,7 +64,6 @@ class ChatAgent:
         :param tool_executor: `ToolExecutor`；与 `tool_schemas` 同时提供时启用工具循环
         """
         decision = route if route is not None else await self.route_question(request.query)
-        print(f"[CHAT AGENT] 识别到的意图 : {decision.route}")
 
         provider = ProviderRegistry.get_active()
         messages = self._base_messages(request, context)

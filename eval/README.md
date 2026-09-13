@@ -13,7 +13,9 @@
 **L1 完全离线可重复**，所以每次改切块 / 换模型 / 调 `top_k`，都能立刻零成本看到命中率变化。
 这正是回答"要不要做章节树切块"（`planning/08` §2.3）唯一有说服力的方式。
 
-L2 还没做（需要 provider key）——见 §5 限制。
+L2 生成层评测是 [`run_eval_l2.py`](run_eval_l2.py)：引用准确率 / 拒答正确率（两种口径对比）/
+工具循环统计 / 延迟与 token 成本。**需要先在界面「设置」里配好并激活一个模型** ——
+没有激活配置时它会明确报错退出，不会静默跑出一份空报告。见下方「L2 怎么跑」。
 
 ## 怎么跑
 
@@ -40,6 +42,22 @@ python eval/run_eval.py --docs-dir eval/fixtures/pdf \
 - `--gate-hit-rate-5 FLOAT`：门禁模式 —— 评测集自检失败 **exit 2**；HitRate@5 低于阈值 **exit 1**；否则 exit 0。不传该参数时行为不变（只出报告）。
 - CI 的 `eval-gate` job（`.github/workflows/quality.yml`）每次 push 用真 e5-large 跑上面这条命令，模型目录走 `actions/cache` 缓存。
 - `eval/fixtures/pdf/ci_corpus.pdf` + `eval/golden_set_ci.jsonl` 是提交在仓库里的小型冒烟集（3 条可评测 + 1 条 no_answer）：只拦"检索链路彻底坏了"这类接线级回归；**全量 46 条的质量结论仍需要你的私人语料**。
+
+## L2 怎么跑（需要 LLM provider）
+
+```bash
+# 先启动前后端，在界面「设置」里填好并激活一个 OpenAI 兼容模型
+python eval/run_eval_l2.py --docs-dir "D:/桌面/测试文件" --out docs/eval-report-l2.md
+python eval/run_eval_l2.py --docs-dir "D:/桌面/测试文件" --limit 5   # 小样本试跑
+python eval/run_eval_l2.py --docs-dir "D:/桌面/测试文件" --no-judge  # 跳过 LLM-as-judge
+```
+
+与 L1 的区别：L2 走**完整问答链路**（路由 → 检索 → Agent（含有界工具循环）→ 带来源回答），
+所以**有 LLM 成本**、结果也**有随机性**；它复用同一份 golden set 与同一套语料摄取逻辑，
+只是把"检索完就停"改成"一路答完并观测"。
+
+拒答判定同时用**启发式**（拒答措辞）与 **LLM-as-judge** 两种口径，并报告两者的分歧率 ——
+"口径本身可不可信"也是结论的一部分。
 
 ## golden set 的 schema
 

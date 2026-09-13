@@ -30,8 +30,6 @@ class AnalysisAgent:
             return validated.model_dump()
 
         except json.JSONDecodeError as e:
-            print(f"解析 JSON 失败, 大模型返回的原始内容为: {raw_content}")
             raise RuntimeError("大模型生成的格式不正确，请重试。") from e
         except Exception as e:
-            print(f"生成解析时发生错误: {e}")
             raise e

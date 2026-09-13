@@ -33,11 +33,9 @@ class RouterAgent:
             result_dict = json.loads(result_str)
             decision = RoutingDecision(**result_dict)
 
-            print(f"[LOG AGENT] Question: '{user_question}' -> Route: {decision.route}")
             return decision
 
         except Exception as e:
-            print(f"[ERREUR AGENT] 路由分发失败，自动降级处理 : {str(e)}")
             # `degraded=True` 让"降级率"成为可统计的指标（见 docs/specs/us-stage1-trace.md AC3）
             return RoutingDecision(
                 route=RouteType.COMPREHENSIVE,
