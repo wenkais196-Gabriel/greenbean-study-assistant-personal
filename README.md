@@ -33,11 +33,12 @@
 | L1 检索评测（`eval/`） | 已实现：46 条 golden set，零 LLM 成本、完全可重复 |
 | Agent 工具（`app/tools/`） | 已实现，且**已接生产对象**：`adapters.py`（检索适配 + workspace 过滤）、`factory.py`（统一装配） |
 | Agent 编排（`app/agents/`） | **有界工具循环**：模型自主调用检索工具（`chunk_search` / `document_retrieval` / `section_context`），失败/超时降级直答 |
+| MCP server（`app/mcp_server.py`） | 已实现：6 个工具按 MCP 协议暴露（stdio），`python backend-python/scripts/run_mcp_server.py` 启动 |
 | 生成层评测（L2：引用准确率 / 拒答正确率） | 未做 —— 需要 LLM provider key |
 
 实测基线（本机 Windows / Python 3.12 / Node 24）：
 
-- Python：`495 passed`，覆盖率 `100%`（`fail_under=100` 硬门槛）
+- Python：`506 passed`，覆盖率 `100%`（`fail_under=100` 硬门槛）
 - 前端：`293 passed`（19 个测试文件）
 - 检索（L1，40 条可评测）：HitRate@5 `90.0%`、@20 `97.5%`、MRR `0.845`
   —— 见 [`docs/eval-report-golden.md`](docs/eval-report-golden.md)、[`eval/README.md`](eval/README.md)
@@ -87,9 +88,9 @@ npm run test:python:coverage
 1. **阶段 0 · 干净 fork 与全绿** ✅：本机跑通全部测试，CI 无 SonarQube 依赖，归属说明就位。
 2. **阶段 1 · 检索与问答闭环** ✅：上传 → 解析 → 落库 → 切块 → 向量化 → 检索 → 带来源回答；
    前端已接真实链路（来源高亮、失败可见、会话持久化），模型可在界面「设置」里配置。
-3. **阶段 2 · Agent 化**（进行中）：`providers/base.py` 已支持 tool calling；`chunk_search` /
+3. **阶段 2 · Agent 化**（✅ 完成）：`providers/base.py` 支持 tool calling；`chunk_search` /
    `document_retrieval` / `section_context` 由 Agent **自主调用**（有界循环 + 失败降级直答）；
-   下一步把 `tools/` 通过 MCP server 暴露出去。
+   `tools/` 已通过 **MCP server**（stdio）暴露。
 4. **阶段 3 · 评测与产品化**：真实 LLM 基线（质量 / TTFT / token 成本）、L2 生成层指标
    （引用准确率 / 拒答正确率）、评测门禁进 CI、引用可跳到原文页。
 5. **阶段 4 · 包装**：README 终稿、架构图、demo 录屏、技术笔记。

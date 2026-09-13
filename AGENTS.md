@@ -50,7 +50,8 @@ GreenBean Study Assistant 是面向在法国学习的中文学生的 AI 课程�
 闭环规格：`docs/specs/us-stage1-ingest.md`、`us-stage1-chat.md`、`us-stage1-upload-async.md`、`us-stage1-trace.md`、
 `us-stage1-ui-integration.md`（界面接入：前端真实问答 / 会话持久化 / 模型配置）、
 `us-stage2-tools-wiring.md`（Agent 工具接生产对象）、
-`us-stage2-agent-tool-loop.md`（Agent 工具循环与降级）。
+`us-stage2-agent-tool-loop.md`（Agent 工具循环与降级）、
+`us-stage2-mcp-server.md`（工具按 MCP 协议暴露）。
 
 **生产向量配置（2026-09-12 起）**：`intfloat/multilingual-e5-large`（1024 维，序列上限 512 token）。
 e5 系列要求 query / passage 前缀，由 `settings.EMBEDDING_QUERY_PREFIX` / `EMBEDDING_PASSAGE_PREFIX` 配置；
