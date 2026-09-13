@@ -335,6 +335,12 @@ def main() -> None:
     parser.add_argument("--docs-dir", required=True, help="包含法语课程 PDF 的目录")
     parser.add_argument("--golden-set", default=str(GOLDEN_SET_PATH), help="golden set 路径（JSONL）")
     parser.add_argument("--out", default="", help="报告输出路径（Markdown）；不传则打印到 stdout")
+    parser.add_argument(
+        "--gate-hit-rate-5",
+        type=float,
+        default=None,
+        help="门禁模式：评测集自检失败 exit 2；HitRate@5 低于该值 exit 1；否则 exit 0",
+    )
     args = parser.parse_args()
 
     docs_dir = Path(args.docs_dir)
@@ -382,6 +388,23 @@ def main() -> None:
         print(f"\n报告已写入：{args.out}")
     else:
         print("\n" + report)
+
+    if args.gate_hit_rate_5 is not None:
+        if problems or no_answer_flags:
+            print("\n❌ 门禁失败：评测集自检未通过（见上方警告）")
+            raise SystemExit(2)
+        overall = hit_rates(results)
+        rate_at_5 = overall[5]
+        if rate_at_5 < args.gate_hit_rate_5:
+            print(
+                f"\n❌ 门禁失败：HitRate@5 = {rate_at_5:.1%}，"
+                f"低于阈值 {args.gate_hit_rate_5:.1%}"
+            )
+            raise SystemExit(1)
+        print(
+            f"\n✅ 门禁通过：HitRate@5 = {rate_at_5:.1%}"
+            f"（阈值 {args.gate_hit_rate_5:.1%}）"
+        )
 
 
 if __name__ == "__main__":

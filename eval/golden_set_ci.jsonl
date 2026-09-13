@@ -1,0 +1,4 @@
+{"id":"ci001","type":"fact","query":"这个项目用什么框架做后端？","expected_sources":[{"doc":"ci_corpus.pdf","pages":[1]}],"expected_keywords":["SpringBoot"],"notes":"CI 门禁：第 1 页主题（后端框架）"}
+{"id":"ci002","type":"terminology","query":"SonarQube 在这个项目里做什么？","expected_sources":[{"doc":"ci_corpus.pdf","pages":[2]}],"expected_keywords":["SonarQube"],"notes":"CI 门禁：第 2 页主题（静态分析）"}
+{"id":"ci003","type":"fact","query":"Quand le projet doit-il être présenté ?","expected_sources":[{"doc":"ci_corpus.pdf","pages":[5]}],"expected_keywords":["17 avril"],"notes":"CI 门禁：第 5 页主题（答辩时间）"}
+{"id":"ci004","type":"no_answer","query":"澳大利亚的首都是哪座城市？","expected_sources":[],"expected_keywords":[],"must_not_appear":["Australie","Canberra"],"notes":"CI 门禁：语料里没有地理内容"}

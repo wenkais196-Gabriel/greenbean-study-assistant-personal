@@ -30,6 +30,17 @@ python eval/run_eval.py --docs-dir "D:/桌面/测试文件" --out docs/eval-repo
 
 首次运行要下载/加载 embedding 模型（e5-large 约 2.2 GB）；之后每次约 2 分钟（290 页语料）。
 
+### CI 门禁（小型冒烟集，每 push 跑）
+
+```bash
+python eval/run_eval.py --docs-dir eval/fixtures/pdf \
+  --golden-set eval/golden_set_ci.jsonl --gate-hit-rate-5 0.6
+```
+
+- `--gate-hit-rate-5 FLOAT`：门禁模式 —— 评测集自检失败 **exit 2**；HitRate@5 低于阈值 **exit 1**；否则 exit 0。不传该参数时行为不变（只出报告）。
+- CI 的 `eval-gate` job（`.github/workflows/quality.yml`）每次 push 用真 e5-large 跑上面这条命令，模型目录走 `actions/cache` 缓存。
+- `eval/fixtures/pdf/ci_corpus.pdf` + `eval/golden_set_ci.jsonl` 是提交在仓库里的小型冒烟集（3 条可评测 + 1 条 no_answer）：只拦"检索链路彻底坏了"这类接线级回归；**全量 46 条的质量结论仍需要你的私人语料**。
+
 ## golden set 的 schema
 
 `eval/golden_set.jsonl`，一行一条：
