@@ -1,4 +1,5 @@
 import sqlite3
+from datetime import datetime, timezone
 
 import sqlite_vec
 
@@ -340,3 +341,84 @@ def test_analysis_result_repository_get_by_workspace_id_returns_empty_list_when_
     with session_factory() as session:
         assert AnalysisResultRepository(session).get_by_workspace_id("inconnu") == []
 
+
+
+# ── 界面只读查询：文档列表与文档单元内容 ────────────────────────────
+
+
+def test_document_repository_list_all_returns_newest_first(session_factory):
+    """文档列表按 created_at 降序 —— 新上传的排在最前。"""
+    older = DocumentRecord(
+        workspace_id="workspace_1",
+        title="旧文档",
+        original_filename="old.pdf",
+        file_type=DocumentFileType.PDF,
+        file_path="data/uploads/old.pdf",
+        created_at=datetime(2026, 9, 1, tzinfo=timezone.utc),
+    )
+    newer = DocumentRecord(
+        workspace_id="workspace_1",
+        title="新文档",
+        original_filename="new.pdf",
+        file_type=DocumentFileType.PDF,
+        file_path="data/uploads/new.pdf",
+        created_at=datetime(2026, 9, 2, tzinfo=timezone.utc),
+    )
+    with session_factory() as session:
+        DocumentRepository(session).save(newer)
+        DocumentRepository(session).save(older)
+        session.commit()
+
+    with session_factory() as session:
+        titles = [record.title for record in DocumentRepository(session).list_all()]
+
+    assert titles == ["新文档", "旧文档"]
+
+
+def test_document_repository_list_all_returns_empty_list_when_no_documents(session_factory):
+    with session_factory() as session:
+        assert DocumentRepository(session).list_all() == []
+
+
+def test_document_unit_repository_list_by_document_orders_by_sequence_index(session_factory):
+    """单元按 sequence_index 升序 —— 顺序必须来自查询，而不是插入顺序。"""
+    document = DocumentRecord(
+        workspace_id="workspace_1",
+        title="Course Deck",
+        original_filename="deck.pdf",
+        file_type=DocumentFileType.PDF,
+        file_path="data/uploads/deck.pdf",
+    )
+    second = DocumentUnit(
+        document_id=document.id,
+        sequence_index=1,
+        text_content="第二页",
+        page_number=2,
+    )
+    first = DocumentUnit(
+        document_id=document.id,
+        sequence_index=0,
+        text_content="第一页",
+        page_number=1,
+    )
+    with session_factory() as session:
+        DocumentRepository(session).save(document)
+        # 故意乱序写入
+        DocumentUnitRepository(session).save(second)
+        DocumentUnitRepository(session).save(first)
+        session.commit()
+
+    with session_factory() as session:
+        texts = [
+            unit.text_content
+            for unit in DocumentUnitRepository(session).list_by_document(document.id)
+        ]
+
+    assert texts == ["第一页", "第二页"]
+
+
+def test_document_unit_repository_list_by_document_returns_empty_list_when_unmatched(
+    session_factory,
+):
+    with session_factory() as session:
+        assert DocumentUnitRepository(session).list_by_document("inconnu") == []

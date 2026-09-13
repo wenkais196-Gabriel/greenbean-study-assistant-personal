@@ -1,17 +1,18 @@
-import { useReducer, useCallback, useEffect, useState, useRef } from "react";
+import { useReducer, useCallback, useEffect, useMemo, useState, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import SectionTree from "../components/left/SectionTree";
-import FileManager from "../components/left/FileManager";
+import FileManager, { type FileItem } from "../components/left/FileManager";
 import DocumentViewer from "../components/center/DocumentViewer";
 import ChatPanel from "../components/right/ChatPanel";
 import ResizableHandle from "../components/shared/ResizableHandle";
 import ProviderPanel from "../../provider/components/ProviderPanel";
 import type { WorkspaceState, WorkspaceAction, WorkspacePageProps, TextFormatAction } from "../type";
 import type { SectionNode, ContentBlock, ContentLine, FootnoteReference } from "../../../types/section";
-import type { ChatMessage } from "../../../types/chat";
+import type { ChatMessage, ChatSource } from "../../../types/chat";
 import { ApiError } from "../../../lib/apiClient";
 import { askQuestion, fetchSessionMessages, DEFAULT_WORKSPACE_ID } from "../../chat/api/chatApi";
 import { getOrCreateSessionId } from "../../chat/sessionStore";
+import { fetchDocumentUnits, listDocuments, type DocumentSummary, type DocumentUnit } from "../../document/api/documentApi";
 
 /** 随请求带给后端的历史消息条数：够维持指代，又不至于把 prompt 撑爆。 */
 const MAX_HISTORY_MESSAGES = 8;
@@ -77,6 +78,74 @@ const initialFootnotes: FootnoteReference[] = [
   { id: "fn-1", refNumber: "1", sourceText: "Gartner预测到2025年AI在教育领域创造超过500亿美元的市场价值。", sourceDesc: "第1页，第1段" },
   { id: "fn-2", refNumber: "2", sourceText: "现有针对在法中国留学生的法语AI辅导产品仍属空白。", sourceDesc: "第1页，第6段" },
 ];
+
+/** 一页在界面上的标题：有页码用页码，没有就退回顺序号。 */
+function unitLabel(unit: DocumentUnit): string {
+  return unit.pageNumber != null ? `第 ${unit.pageNumber} 页` : `第 ${unit.sequenceIndex + 1} 节`;
+}
+
+/** 内容单元 → 左侧导航节点。章节树暂缓（见 docs 里的 BDD 假设），先按"页"列出。 */
+function unitsToSections(units: DocumentUnit[]): SectionNode[] {
+  return units.map((unit) => ({ id: unit.unitId, title: unitLabel(unit) }));
+}
+
+/** 内容单元 → 中间正文块（`sectionId` 用单元 ID，`DocumentViewer` 按它过滤）。 */
+function unitsToBlocks(units: DocumentUnit[]): ContentBlock[] {
+  return units.map((unit) => ({
+    id: unit.unitId,
+    sectionId: unit.unitId,
+    pageNumber: unit.pageNumber,
+    title: unitLabel(unit),
+    contentType: "text",
+    lines: unit.textContent
+      .split("\n")
+      .map((text) => text.trim())
+      .filter((text) => text.length > 0)
+      .map((text, index): ContentLine => ({ id: `${unit.unitId}-l${index}`, text, type: "paragraph" })),
+  }));
+}
+
+/** 后端文件类型枚举 → 文件面板的徽标类型。 */
+const FILE_TYPE_BADGES: Record<string, FileItem["type"]> = {
+  pdf: "PDF", docx: "DOC", pptx: "PPT", image: "IMG", text: "TXT", other: "TXT",
+};
+
+/** 后端处理状态 → 文件面板的状态点。 */
+const FILE_STATUSES: Record<string, FileItem["status"]> = {
+  parsed: "parsed", indexed: "parsed", uploaded: "parsing", failed: "pending",
+};
+
+/** 后端文档摘要 → 左侧文件面板的一条。 */
+function toFileItem(document: DocumentSummary): FileItem {
+  return {
+    id: document.documentId,
+    name: document.title,
+    type: FILE_TYPE_BADGES[document.fileType] ?? "TXT",
+    // 真实文档没有分类：统一归到默认展开的那个文件夹
+    category: "course",
+    size: document.pageCount != null ? `${document.pageCount} 页` : "—",
+    date: document.createdAt.slice(0, 10),
+    status: FILE_STATUSES[document.status] ?? "pending",
+  };
+}
+
+/**
+ * 滚动到某个内容块。
+ *
+ * `data-block-id` 才是 `DocumentViewer` 实际渲染的属性 —— 旧代码查的是 `id="block-..."`，
+ * 所以这段滚动一直没生效（元素永远查不到）。
+ */
+function scrollToBlock(unitId: string) {
+  setTimeout(() => {
+    try {
+      document
+        .querySelector(`[data-block-id="${unitId}"]`)
+        ?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+    } catch {
+      // jsdom 等环境没有 scrollIntoView：滚动失败不该影响定位本身
+    }
+  }, 50);
+}
 
 export function workspaceReducer(state: WorkspaceState, action: WorkspaceAction): WorkspaceState {
   switch (action.type) {
@@ -150,6 +219,8 @@ function WorkspacePage({ workspaceId = DEFAULT_WORKSPACE_ID }: WorkspacePageProp
   const [selectedFileName, setSelectedFileName] = useState<string>("");
   const [chatError, setChatError] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [documents, setDocuments] = useState<DocumentSummary[]>([]);
+  const [documentError, setDocumentError] = useState<string | null>(null);
   // 会话 ID：存在本地，刷新后复用同一个（否则每次都算新会话，后端历史永远拉不到）。
   // `useState` 的惰性初始化保证只生成/读取一次。
   const [sessionId] = useState(() => getOrCreateSessionId());
@@ -164,6 +235,9 @@ function WorkspacePage({ workspaceId = DEFAULT_WORKSPACE_ID }: WorkspacePageProp
   });
 
   rightWidthRef.current = state.rightPanelWidth;
+
+  /** 左侧文件列表：后端文档摘要 → 文件面板的形状。 */
+  const documentFiles = useMemo(() => documents.map(toFileItem), [documents]);
 
   const d = useCallback((s: string) => dispatch({ type: "SELECT_SECTION", sectionId: s } as any), []);
   const togg = useCallback((s: string) => dispatch({ type: "TOGGLE_SECTION_EXPAND", sectionId: s } as any), []);
@@ -202,6 +276,30 @@ function WorkspacePage({ workspaceId = DEFAULT_WORKSPACE_ID }: WorkspacePageProp
       cancelled = true;
     };
   }, [sessionId]);
+
+  /**
+   * 打开工作区时拉一次真实文档列表。
+   *
+   * 失败要显示出来：后端没起来时左侧不该是一片空白，让人以为"没有资料"。
+   */
+  useEffect(() => {
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const docs = await listDocuments();
+        if (!cancelled) setDocuments(docs);
+      } catch (error) {
+        if (!cancelled) {
+          setDocumentError(error instanceof Error ? error.message : "加载文档列表失败");
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   /**
    * 提问：先乐观追加用户消息，再调后端（检索 + 生成），最后追加带来源的助手消息。
@@ -312,11 +410,62 @@ function WorkspacePage({ workspaceId = DEFAULT_WORKSPACE_ID }: WorkspacePageProp
     return () => window.removeEventListener("resize", handleResize);
   }, [state.rightCollapsed, state.leftCollapsed, state.leftPanelWidth]);
 
-  const handleFileSelect = useCallback((fileId: string, fileName: string) => {
-    setSelectedFileId(fileId);
-    setSelectedFileName(fileName);
-    setLeftMode("sections");
+  /** 打开一份文档：拉它的内容单元，铺到左侧导航与中间正文。 */
+  const openDocument = useCallback(async (documentId: string, title: string) => {
+    // 先同步把"打开了哪一份"落到界面上（左侧标题立即切换），再去取内容
+    setSelectedFileId(documentId);
+    setSelectedFileName(title);
+
+    try {
+      const units = await fetchDocumentUnits(documentId);
+      dispatch({ type: "SET_LANG_DATA", sections: unitsToSections(units), contentBlocks: unitsToBlocks(units) });
+      dispatch({ type: "SET_DOC_TITLE", title });
+      // 不自动跳到第一页：与既有行为一致（中间先显示空状态，用户点左侧的页再看正文）
+      dispatch({ type: "SELECT_SECTION", sectionId: null } as any);
+      setDocumentError(null);
+    } catch (error) {
+      setDocumentError(error instanceof Error ? error.message : "加载文档内容失败");
+    }
   }, []);
+
+  const handleFileSelect = useCallback((fileId: string, fileName: string) => {
+    setLeftMode("sections");
+    void openDocument(fileId, fileName);
+  }, [openDocument]);
+
+  /**
+   * 点击 AI 回答里的来源：定位到那份文档的那一页。
+   *
+   * 来源可能属于**另一份文档**（检索是跨文档的），所以按 `documentId` 重新取单元，
+   * 再按 `pageNumber` 找到对应单元；页码缺失或页不存在时给可读提示，而不是静默无反应。
+   */
+  const revealSource = useCallback(async (source: ChatSource) => {
+    if (source.pageNumber == null) {
+      setDocumentError("无法定位到原文页码");
+      return;
+    }
+
+    try {
+      const units = await fetchDocumentUnits(source.documentId);
+      const target = units.find((unit) => unit.pageNumber === source.pageNumber);
+      if (!target) {
+        setDocumentError("无法定位到原文页码");
+        return;
+      }
+
+      const title =
+        documents.find((doc) => doc.documentId === source.documentId)?.title ?? source.documentId;
+      setSelectedFileId(source.documentId);
+      setSelectedFileName(title);
+      dispatch({ type: "SET_LANG_DATA", sections: unitsToSections(units), contentBlocks: unitsToBlocks(units) });
+      dispatch({ type: "SET_DOC_TITLE", title });
+      dispatch({ type: "SELECT_SECTION", sectionId: target.unitId } as any);
+      setDocumentError(null);
+      scrollToBlock(target.unitId);
+    } catch (error) {
+      setDocumentError(error instanceof Error ? error.message : "加载文档内容失败");
+    }
+  }, [documents]);
 
   const handleBackToFiles = useCallback(() => {
     setLeftMode("files");
@@ -325,10 +474,7 @@ function WorkspacePage({ workspaceId = DEFAULT_WORKSPACE_ID }: WorkspacePageProp
 
   const handleSectionSelect = useCallback((id: string) => {
     d(id);
-    setTimeout(() => {
-      const el = document.getElementById(`block-${id}`);
-      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 50);
+    scrollToBlock(id);
   }, [d]);
 
   const showLeftPanel = leftMode !== null;
@@ -383,7 +529,7 @@ function WorkspacePage({ workspaceId = DEFAULT_WORKSPACE_ID }: WorkspacePageProp
                   {leftMode === "files" && (
                     <motion.div key="files-panel" initial={{ x: -state.leftPanelWidth }} animate={{ x: 0 }} exit={{ x: -state.leftPanelWidth }}
                       transition={{ duration: 0.35, ease: [0.25, 0.1, 0.25, 1] }} className="absolute inset-0 bg-white/70">
-                      <FileManager onFileSelectWithName={handleFileSelect} />
+                      <FileManager files={documentFiles} onFileSelectWithName={handleFileSelect} />
                     </motion.div>
                   )}
                   {leftMode === "sections" && selectedFileId && (
@@ -402,6 +548,11 @@ function WorkspacePage({ workspaceId = DEFAULT_WORKSPACE_ID }: WorkspacePageProp
         {showLeftPanel && <ResizableHandle onResize={setLeftW} position="left" />}
 
         <main className="flex-1 min-w-0 min-h-0">
+          {documentError && (
+            <div role="alert" className="mx-4 mt-3 px-3 py-2 rounded-xl bg-red-50 border border-red-200 text-xs text-red-600 break-words">
+              {documentError}
+            </div>
+          )}
           <DocumentViewer contentBlocks={state.contentBlocks} selectedSectionId={state.selectedSectionId}
             footnotes={state.footnotes} expandedFootnoteId={state.expandedFootnoteId}
             currentSelection={state.currentSelection} showSelectionMenu={state.showSelectionMenu} selectionMenuPos={state.selectionMenuPos}
@@ -419,7 +570,8 @@ function WorkspacePage({ workspaceId = DEFAULT_WORKSPACE_ID }: WorkspacePageProp
           {!state.rightCollapsed && (
             <div style={{ width: state.rightPanelWidth, maxWidth: "100%" }} className="h-full overflow-hidden relative">
               <ChatPanel messages={state.chatMessages} input={state.chatInput} quotedText={state.quotedText} tokenUsage={state.tokenUsage}
-                onInputChange={ci} onSend={send} onClearQuote={cq} loading={state.loading} error={chatError} />
+                onInputChange={ci} onSend={send} onClearQuote={cq} loading={state.loading} error={chatError}
+                onSourceClick={revealSource} />
             </div>
           )}
         </motion.aside>

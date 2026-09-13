@@ -98,8 +98,10 @@ describe("WorkspacePage · 恢复会话历史", () => {
 
   it("会话在后端不存在时按空历史处理，不弹错误", async () => {
     localStorage.setItem(SESSION_STORAGE_KEY, "s-gone");
-    fetchMock.mockResolvedValue(
-      jsonResponse({ detail: "会话不存在: s-gone" }, { ok: false, status: 404 }),
+    fetchMock.mockImplementation(async (url: string) =>
+      String(url).includes("/api/documents")
+        ? jsonResponse({ code: 200, message: "ok", data: [] })
+        : jsonResponse({ detail: "会话不存在: s-gone" }, { ok: false, status: 404 }),
     );
 
     render(<WorkspacePage />);
@@ -110,7 +112,13 @@ describe("WorkspacePage · 恢复会话历史", () => {
 
   it("后端不可用时把错误显示出来", async () => {
     localStorage.setItem(SESSION_STORAGE_KEY, "s-1");
-    fetchMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    fetchMock.mockImplementation(async (url: string) => {
+      // 只让会话历史请求失败：文档列表成功返回，才能断言"只有一个错误提示"
+      if (String(url).includes("/api/documents")) {
+        return jsonResponse({ code: 200, message: "ok", data: [] });
+      }
+      throw new TypeError("Failed to fetch");
+    });
 
     render(<WorkspacePage />);
 

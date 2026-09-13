@@ -14,8 +14,10 @@ from fastapi import status as http_status
 from fastapi.concurrency import run_in_threadpool
 
 from app.db.runtime import lazy_session_factory
+from app.schemas.document_schema import DocumentSummaryPayload, DocumentUnitPayload
 from app.schemas.upload_schema import IngestJobPayload
 from app.services.document_ingest_service import DocumentIngestService
+from app.services.document_query_service import DocumentQueryService
 from app.services.ingest_job_service import IngestJobService
 from app.services.trace_recorder import production_trace_recorder
 from app.utils.file_utils import is_supported, get_extension
@@ -33,6 +35,9 @@ _RESPONSE_500_INTERNAL_ERROR = {
     http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "服务器内部错误"}
 }
 _RESPONSE_400_AND_500 = {**_RESPONSE_400_BAD_REQUEST, **_RESPONSE_500_INTERNAL_ERROR}
+_RESPONSE_404_DOCUMENT_NOT_FOUND = {
+    http_status.HTTP_404_NOT_FOUND: {"description": "文档不存在"}
+}
 
 # 支持的格式描述信息，供错误提示复用
 _SUPPORTED_FORMATS_MSG = (
@@ -130,4 +135,56 @@ async def get_ingest_job(
         "code": 200,
         "message": "ok",
         "data": IngestJobPayload.from_job(job).model_dump(mode="json"),
+    }
+
+
+@lru_cache(maxsize=1)
+def get_document_query_service() -> DocumentQueryService:
+    """依赖注入：取文档查询服务（测试用 `dependency_overrides` 覆盖，或 `cache_clear()` 重置）。
+
+    与 `get_job_service` 一致：会话工厂懒加载，构造时**不建库**。
+    """
+    return DocumentQueryService(session_factory=lazy_session_factory())
+
+
+@router.get("", responses=_RESPONSE_500_INTERNAL_ERROR)
+async def list_documents(
+    query_service: Annotated[DocumentQueryService, Depends(get_document_query_service)],
+):
+    """列出已上传的文档（新的在前），供界面左侧文件列表使用。
+
+    一份文档都没有时返回**空数组**而不是 404 —— "还没上传资料"是正常状态，不是错误。
+    """
+    records = await run_in_threadpool(query_service.list_documents)
+
+    return {
+        "code": 200,
+        "message": "ok",
+        "data": [
+            DocumentSummaryPayload.from_record(record).model_dump(mode="json")
+            for record in records
+        ],
+    }
+
+
+@router.get("/{document_id}/units", responses=_RESPONSE_404_DOCUMENT_NOT_FOUND)
+async def list_document_units(
+    document_id: str,
+    query_service: Annotated[DocumentQueryService, Depends(get_document_query_service)],
+):
+    """读取一份文档的内容单元（按文档内顺序）。
+
+    界面用它显示原文，并按 AI 回答里的引用页码定位到对应页。
+    """
+    units = await run_in_threadpool(query_service.list_units, document_id)
+    if units is None:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail=f"文档不存在: {document_id}",
+        )
+
+    return {
+        "code": 200,
+        "message": "ok",
+        "data": [DocumentUnitPayload.from_unit(unit).model_dump(mode="json") for unit in units],
     }

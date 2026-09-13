@@ -64,6 +64,8 @@ export interface ContentBlock {
   imageUrl?: string;
   /** 图片标题（image类型时有效） */
   imageCaption?: string;
+  /** 来源页码（真实文档才有）；AI 引用跳转按它定位到原文 */
+  pageNumber?: number | null;
 }
 
 /** 脚注引用：原文引用来源 */

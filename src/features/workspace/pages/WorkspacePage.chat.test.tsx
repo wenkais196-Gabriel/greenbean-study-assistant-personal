@@ -63,9 +63,14 @@ const chatPayload = {
  * 挂载即拉历史之后，不能再假设 `fetchMock.mock.calls[0]` 就是提问那一次。
  */
 function mockChatApi(payload: unknown, history: unknown = []) {
-  return vi.fn(async (url: string) =>
-    String(url).includes("/messages") ? jsonResponse(history) : jsonResponse(payload),
-  );
+  return vi.fn(async (url: string) => {
+    const target = String(url);
+    // 文档列表接口单列一支：否则它会被当成问答负载解析而报错
+    if (target.includes("/api/documents")) {
+      return jsonResponse({ code: 200, message: "ok", data: [] });
+    }
+    return target.includes("/messages") ? jsonResponse(history) : jsonResponse(payload);
+  });
 }
 
 /** 在当前面板里输入问题并回车发送。 */
@@ -123,11 +128,15 @@ describe("WorkspacePage · 问答接入后端", () => {
   });
 
   it("模型未配置时显示错误提示且不产生助手回答", async () => {
-    fetchMock.mockImplementation(async (url: string) =>
-      String(url).includes("/messages")
+    fetchMock.mockImplementation(async (url: string) => {
+      const target = String(url);
+      if (target.includes("/api/documents")) {
+        return jsonResponse({ code: 200, message: "ok", data: [] });
+      }
+      return target.includes("/messages")
         ? jsonResponse([])
-        : jsonResponse({ detail: "尚未配置可用的模型 provider" }, { ok: false, status: 503 }),
-    );
+        : jsonResponse({ detail: "尚未配置可用的模型 provider" }, { ok: false, status: 503 });
+    });
 
     render(<WorkspacePage />);
     askQuestion("什么是监督学习");

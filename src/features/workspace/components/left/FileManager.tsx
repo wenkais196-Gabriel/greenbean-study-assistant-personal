@@ -119,7 +119,7 @@ export default function FileManager({
 
   const [searchQuery, setSearchQuery] = useState("");
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(["course"]));
-  const [internalFiles, setInternalFiles] = useState<FileItem[]>(() => getDefaultFiles(lang));
+  const [internalFiles, setInternalFiles] = useState<FileItem[]>(() => externalFiles ?? getDefaultFiles(lang));
   const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
 
   // 右键菜单状态
@@ -129,7 +129,14 @@ export default function FileManager({
   const renameInputRef = useRef<HTMLInputElement>(null);
 
   const folders = externalFolders ?? DEFAULT_FOLDERS;
-  const allFiles = externalFiles ?? internalFiles;
+  const allFiles = internalFiles;
+
+  // `externalFiles` 是"外部数据源"（后端的真实文档）：变化时同步进来。
+  // 之后的本地编辑（重命名 / 删除 / 移动）只作用于这份副本 —— 后端暂无这些接口，
+  // 编辑结果留在本次会话里；不传 `files` 时保持内置演示数据。
+  useEffect(() => {
+    if (externalFiles) setInternalFiles(externalFiles);
+  }, [externalFiles]);
 
   /** 切换文件夹展开/折叠 */
   const toggleFolder = useCallback((key: string) => {

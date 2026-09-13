@@ -1,5 +1,5 @@
 import type { SectionNode, ContentBlock, FootnoteReference, TextSelection } from "../../types/section";
-import type { ChatMessage } from "../../types/chat";
+import type { ChatMessage, ChatSource } from "../../types/chat";
 
 export type TextFormatAction = "bold" | "italic" | "underline" | "strikethrough" | "highlight" | "align-left" | "align-center" | "align-right" | "align-justify" | "insert-image" | "insert-table";
 
@@ -88,6 +88,8 @@ export interface ChatPanelProps {
   loading: boolean;
   /** 后端返回的错误文案（如"尚未配置可用的模型"）；为空表示没有错误 */
   error?: string | null;
+  /** 点击某条来源：跳到对应文档的那一页原文 */
+  onSourceClick?: (source: ChatSource) => void;
 }
 
 export interface WorkspacePageProps {

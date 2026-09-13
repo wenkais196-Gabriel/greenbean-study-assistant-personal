@@ -52,7 +52,7 @@ function QuoteBar({ text, onClear }: { text: string; onClear: () => void }) {
 }
 
 /** 右侧 AI 聊天面板组件 */
-function ChatPanel({ messages, input, quotedText, tokenUsage, onInputChange, onSend, onClearQuote, loading, error }: ChatPanelProps) {
+function ChatPanel({ messages, input, quotedText, tokenUsage, onInputChange, onSend, onClearQuote, loading, error, onSourceClick }: ChatPanelProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   // 当前高亮的来源条目（messageId + 下标）；再点一次取消高亮
@@ -106,7 +106,12 @@ function ChatPanel({ messages, input, quotedText, tokenUsage, onInputChange, onS
                       const active = activeSource?.messageId === msg.id && activeSource.index === index;
                       return (
                         <button key={`${msg.id}-source-${index}`} type="button" aria-pressed={active}
-                          onClick={() => setActiveSource(active ? null : { messageId: msg.id, index })}
+                          onClick={() => {
+                            const next = active ? null : { messageId: msg.id, index };
+                            setActiveSource(next);
+                            // 选中时把来源交给页面：切到对应文档的那一页
+                            if (next) onSourceClick?.(source);
+                          }}
                           title={source.headingPath?.join(" / ") ?? undefined}
                           className={`text-[10px] px-1.5 py-0.5 rounded-md border transition-colors cursor-pointer ${
                             active

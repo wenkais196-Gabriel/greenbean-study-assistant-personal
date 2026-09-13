@@ -35,6 +35,24 @@ class DocumentUnitRepository:
         model = self.session.get(DocumentUnitModel, unit_id)
         if model is None:
             return None
+        return self._to_entity(model)
+
+    def list_by_document(self, document_id: str) -> list[DocumentUnit]:
+        """某份文档的全部内容单元，按 `sequence_index` **升序**。
+
+        顺序由查询保证，而不是插入顺序 —— 界面里的页码顺序依赖这个契约。
+        文档不存在时返回空列表（"文档不存在"的判定在 `DocumentQueryService`）。
+        """
+        models = (
+            self.session.query(DocumentUnitModel)
+            .filter(DocumentUnitModel.document_id == document_id)
+            .order_by(DocumentUnitModel.sequence_index.asc())
+            .all()
+        )
+        return [self._to_entity(model) for model in models]
+
+    @staticmethod
+    def _to_entity(model: DocumentUnitModel) -> DocumentUnit:
         return DocumentUnit(
             id=model.id,
             document_id=model.document_id,
