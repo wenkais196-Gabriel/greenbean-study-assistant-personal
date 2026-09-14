@@ -174,6 +174,20 @@ describe("WorkspacePage · 接真实文档与引用跳转", () => {
     expect(await screen.findByText(/Deuxième page du cours/)).toBeTruthy();
   });
 
+  it("点击正文里的 [来源 N] 也能定位到原文页", async () => {
+    // 内联引用与来源条目走同一条链路 —— 这条用例锁住"正文入口真的接到了 revealSource"
+    const cited = { ...chatPayloadFor(2), answer: "监督学习用带标签的数据训练模型 [来源 1]。" };
+    vi.stubGlobal("fetch", mockApi({ chat: cited }));
+
+    render(<WorkspacePage />);
+    ask("监督学习是什么");
+    await screen.findByText(/监督学习用带标签的数据训练模型/);
+
+    fireEvent.click(await screen.findByRole("button", { name: "[来源 1]" }));
+
+    expect(await screen.findByText(/Deuxième page du cours/)).toBeTruthy();
+  });
+
   it("来源没有页码时给出可读提示且不崩溃", async () => {
     vi.stubGlobal("fetch", mockApi({ chat: chatPayloadFor(null) }));
 

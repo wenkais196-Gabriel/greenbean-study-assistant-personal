@@ -1,4 +1,5 @@
 import { useRef, useEffect, useState, type KeyboardEvent } from "react";
+import type { ChatMessage, ChatSource } from "../../../../types/chat";
 import type { ChatPanelProps } from "../../type";
 
 /** AI logo */
@@ -51,6 +52,73 @@ function QuoteBar({ text, onClear }: { text: string; onClear: () => void }) {
   );
 }
 
+/** 正文里的来源记号：与 `ContextBuilder.render()` 写进上下文的产物一致（`[来源 1]` / `[来源 1, 第3页]`）。 */
+const CITATION_PATTERN = /\[来源\s*[^\]]*\]/g;
+
+/** `第 N 页` 是页码、不是来源号：解析来源序号前先剔掉，否则页号会被当成来源。 */
+const PAGE_LABEL_PATTERN = /第\s*\d+\s*页/g;
+
+/** 组内的来源序号（`[来源 1, 来源 2]` 与 `[来源 1、2]` 都要能取出 1 和 2）。 */
+const SOURCE_INDEX_PATTERN = /(?:来源\s*)?(\d+)/g;
+
+/** 回答正文的一段：普通文本，或一处来源记号（`indices` 是它指到的来源序号，1-based）。 */
+interface AnswerSegment {
+  text: string;
+  indices: number[];
+}
+
+/** 把回答正文切成「普通文本 / 来源记号」交替的片段，供渲染成可点击的引用。 */
+export function parseAnswerSegments(content: string): AnswerSegment[] {
+  const segments: AnswerSegment[] = [];
+  let cursor = 0;
+  for (const match of content.matchAll(CITATION_PATTERN)) {
+    const start = match.index ?? 0;
+    if (start > cursor) segments.push({ text: content.slice(cursor, start), indices: [] });
+    const inner = match[0].replace(PAGE_LABEL_PATTERN, "");
+    const indices = [...inner.matchAll(SOURCE_INDEX_PATTERN)].map((m) => Number(m[1]));
+    segments.push({ text: match[0], indices });
+    cursor = start + match[0].length;
+  }
+  if (cursor < content.length) segments.push({ text: content.slice(cursor), indices: [] });
+  return segments;
+}
+
+/**
+ * 回答正文：`[来源 N]` 渲染成可点击的引用，点击跳到对应的原文页。
+ *
+ * 序号越界（模型引用了不存在的来源）时**不伪装成可点击** —— 原文照样显示，
+ * 但它是普通文本、点不动。引用能不能落到原文页是这套 UI 的卖点，不能靠"看起来像"。
+ */
+function AnswerContent({ message, activeIndex, onCiteClick }: {
+  message: ChatMessage;
+  activeIndex: number | null;
+  onCiteClick: (index: number, source: ChatSource) => void;
+}) {
+  if (message.role !== "assistant") return <>{message.content}</>;
+
+  const sources = message.sources ?? [];
+  return (
+    <>
+      {parseAnswerSegments(message.content).map((segment, segmentIndex) => {
+        // 只留下能对应到真实来源的序号
+        const targets = segment.indices.filter((index) => sources[index - 1] != null);
+        if (targets.length === 0) return <span key={segmentIndex}>{segment.text}</span>;
+
+        const active = activeIndex != null && targets.includes(activeIndex);
+        return (
+          <button key={segmentIndex} type="button" aria-pressed={active} title="跳到原文这一页"
+            onClick={() => onCiteClick(targets[0], sources[targets[0] - 1])}
+            className={`inline text-[10px] align-baseline px-1 py-px rounded border transition-colors cursor-pointer ${
+              active ? "bg-blue-500 text-white border-blue-500" : "bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100"
+            }`}>
+            {segment.text}
+          </button>
+        );
+      })}
+    </>
+  );
+}
+
 /** 右侧 AI 聊天面板组件 */
 function ChatPanel({ messages, input, quotedText, tokenUsage, onInputChange, onSend, onClearQuote, loading, error, onSourceClick }: ChatPanelProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -99,7 +167,17 @@ function ChatPanel({ messages, input, quotedText, tokenUsage, onInputChange, onS
                   ? "bg-black text-white rounded-br-md"
                   : "bg-black/5 text-neutral-700 rounded-bl-md"
               }`}>
-                <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                <p className="whitespace-pre-wrap break-words">
+                  <AnswerContent
+                    message={msg}
+                    activeIndex={activeSource?.messageId === msg.id ? activeSource.index : null}
+                    onCiteClick={(index, source) => {
+                      // 与来源条目一致：再点一次取消高亮
+                      const isSame = activeSource?.messageId === msg.id && activeSource.index === index;
+                      setActiveSource(isSame ? null : { messageId: msg.id, index });
+                      if (!isSame) onSourceClick?.(source);
+                    }} />
+                </p>
                 {msg.sources && msg.sources.length > 0 && (
                   <div className="flex flex-wrap gap-1 mt-2">
                     {msg.sources.map((source, index) => {

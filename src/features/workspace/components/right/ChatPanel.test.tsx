@@ -1,7 +1,7 @@
 import React from "react";
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import ChatPanel from "./ChatPanel";
+import ChatPanel, { parseAnswerSegments } from "./ChatPanel";
 import type { ChatMessage } from "../../../../types/chat";
 
 const sampleMessages: ChatMessage[] = [
@@ -179,5 +179,84 @@ describe("ChatPanel 来源与错误", () => {
     render(<ChatPanel {...defaultProps} error={null} />);
 
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
+
+describe("parseAnswerSegments", () => {
+  it("`第 N 页` 是页码，不会被当成来源号", () => {
+    expect(parseAnswerSegments("见 [来源 1, 第3页]")).toEqual([
+      { text: "见 ", indices: [] },
+      { text: "[来源 1, 第3页]", indices: [1] },
+    ]);
+  });
+
+  it("支持一组引用多个来源", () => {
+    const segments = parseAnswerSegments("A[来源 1, 来源 2]B[来源 3]");
+
+    expect(segments[1]).toEqual({ text: "[来源 1, 来源 2]", indices: [1, 2] });
+    expect(segments[3]).toEqual({ text: "[来源 3]", indices: [3] });
+  });
+
+  it("没有引用时原样返回一段文本", () => {
+    expect(parseAnswerSegments("没有任何引用")).toEqual([{ text: "没有任何引用", indices: [] }]);
+  });
+});
+
+/** 带正文内联引用的回答：`[来源 N]` 要能点到原文页。 */
+const citedMessages: ChatMessage[] = [
+  {
+    id: "msg-cited",
+    role: "assistant",
+    content: "监督学习用带标签的数据训练模型 [来源 1, 第12页]，评估用留出法 [来源 2]。",
+    createdAt: "2025-12-01T10:00:05Z",
+    sources: [
+      { chunkId: "c1", documentId: "doc-1", pageNumber: 12, headingPath: null, distance: 0.31 },
+      { chunkId: "c2", documentId: "doc-1", pageNumber: 3, headingPath: null, distance: 0.44 },
+    ],
+  },
+];
+
+describe("ChatPanel 正文内联引用", () => {
+  it("正文里的 [来源 N] 渲染为可点击引用，点击跳到对应来源", () => {
+    const onSourceClick = vi.fn();
+    render(<ChatPanel {...defaultProps} messages={citedMessages} onSourceClick={onSourceClick} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "[来源 1, 第12页]" }));
+
+    expect(onSourceClick).toHaveBeenCalledTimes(1);
+    expect(onSourceClick.mock.calls[0][0]).toMatchObject({ chunkId: "c1", pageNumber: 12 });
+  });
+
+  it("再点一次取消高亮，且不重复跳转", () => {
+    const onSourceClick = vi.fn();
+    render(<ChatPanel {...defaultProps} messages={citedMessages} onSourceClick={onSourceClick} />);
+
+    const cite = () => screen.getByRole("button", { name: "[来源 1, 第12页]" });
+    fireEvent.click(cite());
+    expect(cite().getAttribute("aria-pressed")).toBe("true");
+
+    fireEvent.click(cite());
+    expect(cite().getAttribute("aria-pressed")).toBe("false");
+    expect(onSourceClick).toHaveBeenCalledTimes(1);
+  });
+
+  it("引用不存在的来源时保持普通文本、不可点击", () => {
+    const outOfRange: ChatMessage[] = [{
+      id: "msg-oob",
+      role: "assistant",
+      content: "这句引了一个不存在的来源 [来源 9]。",
+      createdAt: "2025-12-01T10:00:06Z",
+      sources: [{ chunkId: "c1", documentId: "doc-1", pageNumber: 12, headingPath: null, distance: 0.31 }],
+    }];
+    render(<ChatPanel {...defaultProps} messages={outOfRange} />);
+
+    expect(screen.queryByRole("button", { name: /来源 9/ })).toBeNull();
+    expect(screen.getByText(/引了一个不存在的来源/)).toBeDefined();
+  });
+
+  it("没有来源列表时正文原样显示", () => {
+    render(<ChatPanel {...defaultProps} messages={sampleMessages} />);
+
+    expect(screen.getByText("这是对第二节的模拟回答。")).toBeDefined();
   });
 });
