@@ -88,7 +88,7 @@ e5 系列要求 query / passage 前缀，由 `settings.EMBEDDING_QUERY_PREFIX` /
 - `src-tauri/`：Tauri 桌面端。当前实际注册的 command 只有 `greet`，其他 commands、DTO、services、db、errors 模块均为后续扩展占位。
 - `backend-python/app/`：Python 后端主体，按 `api`、`schemas`、`services`、`repositories`、`entities`、`enums`、`parsers`、`rag`、`tools`、`agents`、`prompts`、`providers`、`utils`、`config`、`db` 分层。
 - `backend-python/tests/`：Python 测试，分 `unit/`（`agents`、`api`、`entities`、`parsers`、`prompts`、`providers`、`services`、`tools`、`utils`）与 `integration/`（`api`、`document`、`persistence`）两层，共用 `conftest.py` 和 `fixtures/`。
-- `docs/`：公开文档。`specs/` 放各批 US 规格（chunking / vector-index / embedding / retrieval / ingest / chat / upload-async / trace / ui-integration）；根目录放实验、诊断、账本与工程方案（`eval-report*.md`、`retrieval-diagnosis.md`、`cost-and-latency.md`、`versioning.md`、`roadmap.md`、`demo-script.md`）。**仓库根另有 `CHANGELOG.md`**（版本变更史，版本号与 `planning/` 的里程碑对齐）。
+- `docs/`：公开文档。`specs/` 放各批 US 规格（chunking / vector-index / embedding / retrieval / ingest / chat / upload-async / trace / ui-integration）与 **R1 契约与决策定稿**（[`r1-contracts.md`](docs/specs/r1-contracts.md)，测试场景与实现的**单一事实源**）；根目录放实验、诊断、账本与工程方案（`eval-report*.md`、`retrieval-diagnosis.md`、`cost-and-latency.md`、`versioning.md`、`roadmap.md`、`demo-script.md`）。**仓库根另有 `CHANGELOG.md`**（版本变更史，版本号与 `planning/` 的里程碑对齐）。
 - `eval/`：分层评测 —— L1 检索层（`run_eval.py`，**零 LLM 成本、完全可重复**，走生产链路并自带口径自检）与 L2 生成层（`run_eval_l2.py`，走完整问答链路，**需要已激活的 provider**）；判定口径与已知局限见 [`eval/README.md`](eval/README.md)。
 - `data/`：本地数据目录。只应保留 `.gitkeep`，数据库和用户上传文件不应提交。
 - `coverage/`：测试覆盖率输出目录，不应提交。
@@ -278,6 +278,14 @@ python -m pip install -r requirements-dev.txt
 - Python 实体和测试中的部分中文描述当前呈现为乱码，疑似历史编码问题。除非任务要求修复编码，否则不要顺手大范围改写，以免扩大变更。
   （在 Windows 控制台里跑 pytest 时，中文输出显示为乱码也是同一个原因，**不代表文件内容坏了**。）
 - `planning/` 是本地私有的规划与决策记录（已加入 `.gitignore`），不要提交到仓库，也不要把它当作公开文档改写。
+  R1 的**验收测试场景**也在其中：`planning/r1-scenarios/batch-*.md` 是场景正文的单一来源，
+  `planning/apply-r1-scenarios.mjs` 负责同步到 GitHub（幂等 + 回读逐字校验），
+  `planning/audit-r1-scenarios.mjs` 按质量规则自查，`planning/r1-traceability.md` 是 AC → 场景 → 测试落点的矩阵。
+- ⚠️ **R1（v0.2.0）的验收测试以 GitHub issue 落地**：60 条 `[Test]: [R1-x] …`（`test` 标签 +
+  `R1 · v0.2.0` 里程碑 + 挂到对应 R1 issue 的 sub-issue）。
+  **改动顺序不能反**：先改契约 [`docs/specs/r1-contracts.md`](docs/specs/r1-contracts.md) → 再改 `planning/r1-scenarios/*.md`
+  → 最后跑同步脚本。跳过契约那一步，就会重演"实现与测试各一套"
+  （本仓库已栽过：前端发 `openai_compat`、后端枚举是 `openai-compat`，两边测试各自都绿）。
 - `data/*.db`、`data/uploads/*`、`coverage/`、`node_modules/`、Python 缓存和 Rust `target/` 都应保持未跟踪。
 - `src-tauri/Cargo.lock` 已被跟踪；作为桌面应用，继续保留锁文件。
 - 新增 Tauri command 时要同步更新 `invoke_handler`、必要的 DTO、权限能力和前端调用封装。

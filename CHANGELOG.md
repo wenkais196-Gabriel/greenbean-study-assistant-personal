@@ -12,6 +12,14 @@
 
 ### Added
 - 版本管理方案与公开路线图：[`docs/versioning.md`](docs/versioning.md)、[`docs/roadmap.md`](docs/roadmap.md)、本文件。
+- **R1 契约与决策定稿** [`docs/specs/r1-contracts.md`](docs/specs/r1-contracts.md)：把 8 处此前**并不存在**的契约一次定稿
+  （SSE 流式协议与帧格式、TTFT 双口径、上传重试语义与**文件来源**、重复上传判重策略、新增接口面、
+  `workspaces` 表与默认工作区、quiz 契约、发布门禁入 DoD），并记下各条决策的依据。§0 另附"事实基线"，
+  把"哪些东西其实还没有"钉住（例如 `file_hash` 从未被计算、`workspaces` 表并不存在、`file_path` 一直是空串）。
+- **R1 的验收测试以 60 条 GitHub issue 落地**（`[Test]: [R1-x] …`，`test` 标签，挂到对应 R1 issue 的 sub-issue）：
+  顺序是"契约先定稿 → 再写场景 → 最后实现"。场景质量规则（Definition of Ready + linter + 追溯矩阵）内化进
+  [`.agents/skills/bdd-tdd-implementer`](.agents/skills/bdd-tdd-implementer/SKILL.md)，
+  避免"看起来写完了、却支撑不了开发"的重写成本。
 
 ## [0.1.0] - 2026-09-14
 
