@@ -41,7 +41,7 @@ python eval/run_eval.py --docs-dir eval/fixtures/pdf \
 
 - `--gate-hit-rate-5 FLOAT`：门禁模式 —— 评测集自检失败 **exit 2**；HitRate@5 低于阈值 **exit 1**；否则 exit 0。不传该参数时行为不变（只出报告）。
 - CI 的 `eval-gate` job（`.github/workflows/quality.yml`）每次 push 用真 e5-large 跑上面这条命令，模型目录走 `actions/cache` 缓存。
-- `eval/fixtures/pdf/ci_corpus.pdf` + `eval/golden_set_ci.jsonl` 是提交在仓库里的小型冒烟集（3 条可评测 + 1 条 no_answer）：只拦"检索链路彻底坏了"这类接线级回归；**全量 46 条的质量结论仍需要你的私人语料**。
+- `eval/fixtures/pdf/ci_corpus.pdf` + `eval/golden_set_ci.jsonl` 是提交在仓库里的小型冒烟集（3 条可评测 + 1 条 no_answer）：只拦"检索链路彻底坏了"这类接线级回归；**全量 46 条的质量结论仍需要你的私人语料**——但**别人可复现**的那部分改由自产合成语料承担（见下方「公开基线」与「L2 怎么跑」）。
 
 ### 公开基线（自产合成语料，可随仓库分发）
 
@@ -78,6 +78,23 @@ python eval/run_eval_l2.py --docs-dir "D:/桌面/测试文件" --no-judge  # 跳
 
 拒答判定同时用**启发式**（拒答措辞）与 **LLM-as-judge** 两种口径，并报告两者的分歧率 ——
 "口径本身可不可信"也是结论的一部分。
+
+### L2 的两套语料（口径不同，各自独立陈述）
+
+| 语料 | 条数 | 带 `[来源 N]` | 引用召回率 | 文档命中率 | 端到端 P50 | 报告 |
+|---|---|---|---|---|---|---|
+| 私人（**不可分发**） | 46（40 可评测 + 6 拒答） | 40 / 40 | 77.8% | 89.9% | 5.5 s | `docs/eval-report-l2.md` |
+| 自产合成（**可分发**） | 30（26 可评测 + 4 拒答） | 26 / 26 | 93.5% | 92.5% | 5.6 s | `docs/eval-report-l2-synthetic.md` |
+
+合成语料那份别人 clone 后能自己跑出来（约 **¥0.3**）；跑法与 L1 的公开基线同一套语料：
+
+```bash
+python eval/run_eval_l2.py --docs-dir eval/fixtures/synthetic/pdf \
+  --golden-set eval/golden_set_synthetic.jsonl --out docs/eval-report-l2-synthetic.md
+```
+
+成本与延迟的汇总账本见 [`../docs/cost-and-latency.md`](../docs/cost-and-latency.md)：
+单次提问约 **¥0.01**，L2 全量一次 **不到 ¥1**，而 L1 是**零 LLM 成本**。
 
 ## golden set 的 schema
 

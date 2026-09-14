@@ -41,11 +41,16 @@ GreenBean Study Assistant 是面向在法国学习的中文学生的 AI 课程�
   **已接真实检索上下文**（由 `ChatService` 注入，不再是 mock）；阶段 2 起支持**有界工具循环**
   （模型自主调用检索工具，失败/超时降级直答），规格
   [`docs/specs/us-stage2-agent-tool-loop.md`](docs/specs/us-stage2-agent-tool-loop.md)。
-- `src/features/workspace/`：三栏界面已接真实问答（`WorkspacePage` → `chatApi` → 后端），
-  但**中间的文档正文与左侧文件列表仍是本地 mock** —— 接真数据需要新的"文档单元内容查询"接口（后端暂无）。
+- `src/features/workspace/`：三栏界面已接真实数据 —— 问答走 `WorkspacePage` → `chatApi` → 后端，
+  左侧文件列表与中间正文走 `documentApi`（`GET /api/documents`、`GET /api/documents/{id}/units`），
+  点 AI 回答的来源可**跳到对应文档那页**；回答正文里的 `[来源 N]` 也是可点击引用
+  （`ChatPanel.tsx` 的 `parseAnswerSegments` + `AnswerContent`，序号越界时不伪装成可点击）。
 - 可观测性：结构化 trace 已落地（`agent_traces` 表 + `GET /api/traces/{trace_id}`）。
-- 评测：`eval/` 有 46 条 golden set 与 L1 跑分脚本；**L2 生成层（引用准确率 / 拒答正确率）尚未做**，
-  需要 LLM provider key。
+- 评测：`eval/` 现在是**双语料 + 分层脚本** —— 私人 46 条（不可分发）与**自产合成 30 条**（可分发，
+  别人 clone 后能自己跑出来）；L1 `run_eval.py` **零 LLM 成本、完全可重复**，L2 `run_eval_l2.py`
+  走完整问答链路（要已激活的 provider）。报告：[`docs/eval-report-l2.md`](docs/eval-report-l2.md)（私人）、
+  [`docs/eval-report-l2-synthetic.md`](docs/eval-report-l2-synthetic.md)（合成）；
+  成本与延迟汇总账本：[`docs/cost-and-latency.md`](docs/cost-and-latency.md)。
 
 闭环规格：`docs/specs/us-stage1-ingest.md`、`us-stage1-chat.md`、`us-stage1-upload-async.md`、`us-stage1-trace.md`、
 `us-stage1-ui-integration.md`（界面接入：前端真实问答 / 会话持久化 / 模型配置）、
@@ -83,8 +88,8 @@ e5 系列要求 query / passage 前缀，由 `settings.EMBEDDING_QUERY_PREFIX` /
 - `src-tauri/`：Tauri 桌面端。当前实际注册的 command 只有 `greet`，其他 commands、DTO、services、db、errors 模块均为后续扩展占位。
 - `backend-python/app/`：Python 后端主体，按 `api`、`schemas`、`services`、`repositories`、`entities`、`enums`、`parsers`、`rag`、`tools`、`agents`、`prompts`、`providers`、`utils`、`config`、`db` 分层。
 - `backend-python/tests/`：Python 测试，分 `unit/`（`agents`、`api`、`entities`、`parsers`、`prompts`、`providers`、`services`、`tools`、`utils`）与 `integration/`（`api`、`document`、`persistence`）两层，共用 `conftest.py` 和 `fixtures/`。
-- `docs/`：公开文档。`specs/` 放各批 US 规格（chunking / vector-index / embedding / retrieval / ingest / chat / upload-async / trace / ui-integration）；根目录放实验与诊断报告（`eval-report.md`、`eval-report-golden.md`、`retrieval-diagnosis.md`）。
-- `eval/`：L1 检索评测（`golden_set.jsonl` + `run_eval.py`）。**零 LLM 成本、完全可重复**，走生产链路并自带口径自检；判定口径与已知局限见 [`eval/README.md`](eval/README.md)。
+- `docs/`：公开文档。`specs/` 放各批 US 规格（chunking / vector-index / embedding / retrieval / ingest / chat / upload-async / trace / ui-integration）；根目录放实验、诊断与账本（`eval-report.md`、`eval-report-golden.md`、`eval-report-synthetic.md`、`eval-report-l2.md`、`eval-report-l2-synthetic.md`、`retrieval-diagnosis.md`、`cost-and-latency.md`）。
+- `eval/`：分层评测 —— L1 检索层（`run_eval.py`，**零 LLM 成本、完全可重复**，走生产链路并自带口径自检）与 L2 生成层（`run_eval_l2.py`，走完整问答链路，**需要已激活的 provider**）；判定口径与已知局限见 [`eval/README.md`](eval/README.md)。
 - `data/`：本地数据目录。只应保留 `.gitkeep`，数据库和用户上传文件不应提交。
 - `coverage/`：测试覆盖率输出目录，不应提交。
 - `.github/workflows/quality.yml`：CI 分前端、Python、Rust 三个 job 跑测试并上传覆盖率 artifact。（fork 中已删除上游的 SonarQube 扫描 job 与 `.github/dependabot.yml`。）
@@ -153,6 +158,15 @@ CI 门禁（小型冒烟集，每 push 也跑这条）：
 python eval/run_eval.py --docs-dir eval/fixtures/pdf \
   --golden-set eval/golden_set_ci.jsonl --gate-hit-rate-5 0.6
 ```
+
+L2 生成层评测（走完整问答链路，**会真调 LLM**；需先在界面「设置」里激活一个 provider）：
+
+```bash
+python eval/run_eval_l2.py --docs-dir eval/fixtures/synthetic/pdf \
+  --golden-set eval/golden_set_synthetic.jsonl --out docs/eval-report-l2-synthetic.md
+```
+
+**成本量级**：单次提问约 ¥0.01、L2 全量一次不到 ¥1；汇总账本见 [`docs/cost-and-latency.md`](docs/cost-and-latency.md)。
 
 运行 demo / MCP server：
 
