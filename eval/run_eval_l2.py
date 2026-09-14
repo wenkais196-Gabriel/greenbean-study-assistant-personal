@@ -506,7 +506,7 @@ def render_report(
 
     lines.append("## 六、限制")
     lines.append("")
-    lines.append("1. 样本 46 条，且 query 由项目作者构造（有「照着目录出题」的偏易倾向）；")
+    lines.append(f"1. 样本 {len(outcomes)} 条，且 query 由项目作者构造（有「照着目录出题」的偏易倾向）；")
     lines.append("2. 生成层有随机性，跨次比较需谨慎；")
     lines.append("3. 引用口径只看「引用到的页是否在期望页内」，**没有**判定「答案的每句话都被引用支持」（faithfulness）——那需要更细的 judge，见 planning/10；")
 
