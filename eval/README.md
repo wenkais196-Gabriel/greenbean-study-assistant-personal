@@ -43,6 +43,26 @@ python eval/run_eval.py --docs-dir eval/fixtures/pdf \
 - CI 的 `eval-gate` job（`.github/workflows/quality.yml`）每次 push 用真 e5-large 跑上面这条命令，模型目录走 `actions/cache` 缓存。
 - `eval/fixtures/pdf/ci_corpus.pdf` + `eval/golden_set_ci.jsonl` 是提交在仓库里的小型冒烟集（3 条可评测 + 1 条 no_answer）：只拦"检索链路彻底坏了"这类接线级回归；**全量 46 条的质量结论仍需要你的私人语料**。
 
+### 公开基线（自产合成语料，可随仓库分发）
+
+```bash
+python eval/run_eval.py --docs-dir eval/fixtures/synthetic/pdf \
+  --golden-set eval/golden_set_synthetic.jsonl
+```
+
+私人语料上的那份结论（46 条）**别人复现不了** —— 课件有著作权，不随仓库分发、也不该出现在
+公开录屏里。所以另有一套**完全自产**的合成语料（`eval/fixtures/synthetic/`，
+生成脚本 `scripts/make_synthetic_corpus.py`）承担两件事：demo 的演示文档、以及**别人 clone 后能自己跑出来**的公开基线。
+
+- 当前结果：26 条可评测 **HitRate@5 92.3%**、@10 100%、@1 76.9%、MRR 0.850 —— 见 `docs/eval-report-synthetic.md`。
+  语料是**六份讲义 / 154 页 / 189 个片段**，`top_k=20` 因此只覆盖 10.6% 的语料，并且有两条真实的
+  失败案例（`syn006` 八数码启发式、`syn013` 随机森林），不再是一片满分。
+- ⚠️ **它与私人语料那套不可直接比较**：合成语料排版整齐、没有图表页、没有 OCR 噪声，天然好检索；
+  私人语料则是 5 份文档 / 408 个片段，`top_k=20` 覆盖 4.9%。两份报告是两套口径，各自独立陈述，
+  不要把差距解释成"优化收益"。
+- ⚠️ 合成语料的局限（`no_answer` 只验证了"语料里没有"）见
+  [`fixtures/synthetic/README.md`](fixtures/synthetic/README.md)。
+
 ## L2 怎么跑（需要 LLM provider）
 
 ```bash
@@ -139,3 +159,4 @@ python eval/run_eval_l2.py --docs-dir "D:/桌面/测试文件" --no-judge  # 跳
 | 检索质量的根因诊断与模型对照 | `docs/retrieval-diagnosis.md` |
 | 首测（12 条）的结论与方法学教训 | `docs/eval-report.md` |
 | 为什么 L1 不用 LLM | `planning/10` §1（"让 L1 完全离线可重复"） |
+| 可随仓库分发、别人能复现的公开基线 | `docs/eval-report-synthetic.md`、[`fixtures/synthetic/README.md`](fixtures/synthetic/README.md) |

@@ -36,16 +36,23 @@
 | MCP server（`app/mcp_server.py`） | 已实现：6 个工具按 MCP 协议暴露（stdio），`python backend-python/scripts/run_mcp_server.py` 启动 |
 | 文档查询与工作区接真实数据（`GET /api/documents`、`GET /api/documents/{id}/units`；左侧列表、按页正文、引用点击跳转） | 已实现，有测试覆盖 |
 | 生成层评测（L2：引用准确率 / 拒答正确率 / 工具循环 / 延迟·token） | 已实现：`eval/run_eval_l2.py`，**需要已激活的 provider**（没配就明确报错退出） |
+| 公开演示与公开基线语料（`scripts/make_synthetic_corpus.py`、`eval/fixtures/synthetic/`） | 已实现：**自产**合成课程语料（**六份讲义 154 页** + DOCX / PPTX / PNG），可随仓库分发，配 30 条 golden set |
 
 实测基线（本机 Windows / Python 3.12 / Node 24）：
 
-- Python：`529 passed`，覆盖率 `100%`（`fail_under=100` 硬门槛）
+- Python：`530 passed`，覆盖率 `100%`（`fail_under=100` 硬门槛）
 - 前端：`303 passed`（21 个测试文件）
-- 检索（L1，40 条可评测）：HitRate@5 `90.0%`、@20 `97.5%`、MRR `0.845`
-  —— 见 [`docs/eval-report-golden.md`](docs/eval-report-golden.md)、[`eval/README.md`](eval/README.md)
+- 检索（L1，**私人语料** 40 条可评测）：HitRate@5 `90.0%`、@20 `97.5%`、MRR `0.845`
+  —— 见 [`docs/eval-report-golden.md`](docs/eval-report-golden.md)、[`eval/README.md`](eval/README.md)。
+  语料不可分发，所以**这一行别人复现不了**
 - 生成（L2，40 条可评测 + 6 条拒答）：答案带 `[来源 N]` **40/40**、引用**文档命中率 89.9%**、
   **95.0% 的答案至少引对一个标准答案页**、judge 口径拒答正确率 **100%**；端到端延迟 P50 `5.8s` / P95 `10.2s`
   —— 见 [`docs/eval-report-l2.md`](docs/eval-report-l2.md)
+- 检索（L1，**自产合成语料** 26 条可评测）：HitRate@5 `92.3%`、@10 `100%`、@1 `76.9%`、MRR `0.850`
+  —— 见 [`docs/eval-report-synthetic.md`](docs/eval-report-synthetic.md)、[`eval/fixtures/synthetic/README.md`](eval/fixtures/synthetic/README.md)。
+  语料随仓库分发（六份讲义 / 154 页 / 189 个片段），所以**这一行别人 clone 后能自己跑出来**
+  ⚠️ 与上面那行**不可直接比较**：检索深度 `top_k=20` 覆盖合成语料 `10.6%`、私人语料 `4.9%`，
+  两份报告是两套口径，各自独立陈述
 
 ## 快速开始
 
@@ -88,9 +95,15 @@ python scripts/run_demo.py --check    # 只打印要执行的命令，不真正�
 
 # 把六个工具按 MCP 协议暴露（stdio server，可被 Claude Desktop / Cursor 调用）
 python backend-python/scripts/run_mcp_server.py
+
+# 生成 / 校验自产的演示语料（无第三方著作权，可随仓库分发）
+python scripts/make_synthetic_corpus.py
+python scripts/make_synthetic_corpus.py --check
 ```
 
 > demo 问答需要在界面「设置」里配置并激活一个模型 provider（`api_key` 只存本地，不会回传前端）。
+> 需要文档才能提问，可以直接上传仓库自带的自产语料
+> [`eval/fixtures/synthetic/`](eval/fixtures/synthetic/README.md)（PDF / DOCX / PPTX，图片 OCR 另需本机装 Tesseract）。
 
 ## 技术栈
 

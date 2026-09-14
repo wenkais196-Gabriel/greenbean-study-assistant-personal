@@ -182,6 +182,13 @@ python -m pip install -r requirements-dev.txt
 - CI 使用 Node.js 22、Python 3.12，并在 Linux 上安装 Tauri 所需系统依赖。
 - `sonar-project.properties` 是上游遗留的 SonarQube 配置，本 fork 不再运行扫描，保留仅供参考。
 - 图片 OCR 解析器的测试使用 mock，不需要本机安装 Tesseract 引擎。
+- 测试 fixture 与演示语料都是**自产**的：`eval/fixtures/synthetic/`（六份讲义，154 页，另有 DOCX /
+  PPTX / PNG 格式样例）和 `backend-python/tests/fixtures/pdf/text_two_pages.pdf`，都由
+  `scripts/make_synthetic_corpus.py` 生成（上游带进仓库的那份真实课程作业说明**已替换掉**）。
+  **不要手工替换这些二进制文件** —— 改内容要改脚本再重新生成，
+  `python scripts/make_synthetic_corpus.py --check` 会拦住产物与脚本不一致的情况。
+  ⚠️ 语料每页的字符数被 `test_pdf_ingest_pipeline.py` 的 `EXPECTED_CHARACTER_COUNTS` 硬编码断言，
+  改语料必须同步改它（那里有一行注释指向生成脚本）。
 - ⚠️ `tsc --noEmit` **当前不是绿的**：`App.test.tsx`、`DocumentViewer.tsx`、`WorkspacePage.tsx` 等**未改动**文件上有既存的
   `noUnusedLocals` 报错。CI 只跑 vitest、不跑 tsc，所以这些错误不影响流水线 —— 但新增代码别再往上加新的。
 - ⚠️ **mock `framer-motion` 时组件类型必须缓存**：如果 `motion` 的 Proxy 每次 `get` 都返回新函数，
