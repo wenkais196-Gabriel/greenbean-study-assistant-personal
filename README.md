@@ -110,6 +110,7 @@ python scripts/make_synthetic_corpus.py --check
 > demo 问答需要在界面「设置」里配置并激活一个模型 provider（`api_key` 只存本地，不会回传前端）。
 > 需要文档才能提问，可以直接上传仓库自带的自产语料
 > [`eval/fixtures/synthetic/`](eval/fixtures/synthetic/README.md)（PDF / DOCX / PPTX，图片 OCR 另需本机装 Tesseract）。
+> 演示录制的分镜与自检清单见 [`docs/demo-script.md`](docs/demo-script.md)（**录像里不得出现私人课件与 `api_key`**）。
 
 ## 技术栈
 

@@ -238,6 +238,11 @@ python -m pip install -r requirements-dev.txt
 - ⚠️ **提示词里的引用记号必须与 `ContextBuilder.render()` 真实写进上下文的一致**（`[来源 N]`）。
   曾教模型写 `[p.12]`，L2 实测 40 条里只有 14 条带引用 —— 模型被要求用一套记号、上下文里是另一套。
   改提示词前先看 render 的产物。
+- ⚠️ **前端解析正文引用时，要先把 `第 N 页` 剔掉再取序号**：`render()` 的产物是
+  `[来源 1, 第3页]` —— 方括号里既有来源号也有页码。`ChatPanel.tsx` 的 `parseAnswerSegments`
+  先用 `PAGE_LABEL_PATTERN` 去掉页号、再用 `SOURCE_INDEX_PATTERN` 取数字；否则 `[来源 1, 第3页]`
+  会被读成"引用了来源 1 和来源 3"。改这两个正则前，先看真实回答长什么样
+  （生产库 `chat_messages` 里就有现成样本）。
 - 后端数据目录是**相对后端 cwd** 的（`settings.DATA_DIR = "data"`，`run_demo.py` 以
   `backend-python/` 为 cwd 启动）→ 生产库在 `backend-python/data/`。`.gitignore` 里的
   `data/*.sqlite3` 因带 `/` 被锚定在仓库根、覆盖不到它，所以另加了显式忽略 —— 库里有明文
@@ -261,6 +266,10 @@ python -m pip install -r requirements-dev.txt
 - `eval/` 是评测集的家：改动检索 / 切块 / embedding 模型后应跑一次
   `python eval/run_eval.py --docs-dir "<含 PDF 的语料目录>"`。它走**生产链路**并自带口径自检
   （关键词是否真出现在期望页、no_answer 是否其实有答案）—— 首轮报告正是在这两点上栽过。
+  **现在有两套语料**：私人 46 条（不可分发）与自产合成 30 条（`eval/fixtures/synthetic/`，可分发）；
+  L2 报告里任何"样本 N 条"之类的数字都**必须从被测对象读**（`len(outcomes)`），
+  不能写死 —— `run_eval_l2.py` 的限制节曾把 46 条写死，换成 30 条的合成语料后报告一生成就是错的
+  （与"序列上限硬编码成 128"是同一类错误：**能测的数不要用常量**）。
 - `backend-python/tests/.coveragerc` 里 `fail_under = 100`：**覆盖率是硬门槛**。只跑 `pytest tests` 看不出问题，
   提交前请跑 `pytest --cov=app --cov-config=tests/.coveragerc`（或 `npm run test:python:coverage`）。
   本仓库**不使用** `pragma: no cover` 豁免 —— 未覆盖的分支要写测试，或说明为什么它是不可达的防御分支。
