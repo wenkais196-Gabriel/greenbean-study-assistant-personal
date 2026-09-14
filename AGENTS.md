@@ -88,7 +88,7 @@ e5 系列要求 query / passage 前缀，由 `settings.EMBEDDING_QUERY_PREFIX` /
 - `src-tauri/`：Tauri 桌面端。当前实际注册的 command 只有 `greet`，其他 commands、DTO、services、db、errors 模块均为后续扩展占位。
 - `backend-python/app/`：Python 后端主体，按 `api`、`schemas`、`services`、`repositories`、`entities`、`enums`、`parsers`、`rag`、`tools`、`agents`、`prompts`、`providers`、`utils`、`config`、`db` 分层。
 - `backend-python/tests/`：Python 测试，分 `unit/`（`agents`、`api`、`entities`、`parsers`、`prompts`、`providers`、`services`、`tools`、`utils`）与 `integration/`（`api`、`document`、`persistence`）两层，共用 `conftest.py` 和 `fixtures/`。
-- `docs/`：公开文档。`specs/` 放各批 US 规格（chunking / vector-index / embedding / retrieval / ingest / chat / upload-async / trace / ui-integration）；根目录放实验、诊断与账本（`eval-report.md`、`eval-report-golden.md`、`eval-report-synthetic.md`、`eval-report-l2.md`、`eval-report-l2-synthetic.md`、`retrieval-diagnosis.md`、`cost-and-latency.md`）。
+- `docs/`：公开文档。`specs/` 放各批 US 规格（chunking / vector-index / embedding / retrieval / ingest / chat / upload-async / trace / ui-integration）；根目录放实验、诊断、账本与工程方案（`eval-report*.md`、`retrieval-diagnosis.md`、`cost-and-latency.md`、`versioning.md`、`roadmap.md`、`demo-script.md`）。**仓库根另有 `CHANGELOG.md`**（版本变更史，版本号与 `planning/` 的里程碑对齐）。
 - `eval/`：分层评测 —— L1 检索层（`run_eval.py`，**零 LLM 成本、完全可重复**，走生产链路并自带口径自检）与 L2 生成层（`run_eval_l2.py`，走完整问答链路，**需要已激活的 provider**）；判定口径与已知局限见 [`eval/README.md`](eval/README.md)。
 - `data/`：本地数据目录。只应保留 `.gitkeep`，数据库和用户上传文件不应提交。
 - `coverage/`：测试覆盖率输出目录，不应提交。

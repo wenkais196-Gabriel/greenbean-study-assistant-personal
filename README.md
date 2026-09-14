@@ -132,6 +132,11 @@ python scripts/make_synthetic_corpus.py --check
    （引用准确率 / 拒答正确率）、评测门禁进 CI、引用可跳到原文页。
 5. **阶段 4 · 包装**：README 终稿、架构图、demo 录屏、技术笔记。
 
+版本与路线图：[`CHANGELOG.md`](CHANGELOG.md)（每个版本一个 tag、一个 Release）·
+[`docs/roadmap.md`](docs/roadmap.md)（对外路线图）·
+[`docs/versioning.md`](docs/versioning.md)（版本管理方案：trunk-based 分支、semver 与里程碑对齐、
+**本地数据迁移策略**）。
+
 ## 许可
 
 MIT，见 [LICENSE](LICENSE)。原始版权归上游作者所有，本 fork 的修改同样以 MIT 发布。
