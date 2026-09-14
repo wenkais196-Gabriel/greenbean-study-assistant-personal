@@ -279,8 +279,9 @@ pytest tests/integration/document/test_pdf_ingest_pipeline.py -v
 
 #### 测试用 PDF
 
-`tests/fixtures/pdf/text_two_pages.pdf` — 一份 2 页、约 70KB 的法语 M1 MIAGE
-项目文档，作为标准文本型 PDF 测试样本。
+`tests/fixtures/pdf/text_two_pages.pdf` — 一份 2 页、约 6KB 的法语 TP 说明，作为标准文本型
+PDF 测试样本。**它由 `scripts/make_synthetic_corpus.py` 自产**（上游那份真实课程文档已替换掉），
+所以改动它要改生成脚本再重新生成，然后用 `python scripts/make_synthetic_corpus.py --check` 确认产物一致。
 
 #### 三层验证内容
 
@@ -297,11 +298,11 @@ pytest tests/integration/document/test_pdf_ingest_pipeline.py -v
 总页数: 2
 
 ✅ 第1页:
-    char_count = 2469
-    content 前 80 字符: Projet M1 MIAGE FI parcours dev ...
+    char_count = 1831
+    content 前 80 字符: TP 03 - de la source brute au passage indexable ...
 ✅ 第2页:
-    char_count = 1251
-    content 前 80 字符: contiendra la compilation et le test ...
+    char_count = 902
+    content 前 80 字符: Modalités de rendu et barème ...
 
 PDFParser 测试结果: ✅ 全部通过
 
@@ -315,8 +316,8 @@ PDFParser 测试结果: ✅ 全部通过
 DocumentUnits 数量: 2
 
 PageIndex 预览:
-  第1页: 2469 字符, source_type=pdf
-  第2页: 1251 字符, source_type=pdf
+  第1页: 1831 字符, source_type=pdf
+  第2页: 902 字符, source_type=pdf
 
 🎉 所有三层测试全部通过！PDF Parser 工作正常。
 ```

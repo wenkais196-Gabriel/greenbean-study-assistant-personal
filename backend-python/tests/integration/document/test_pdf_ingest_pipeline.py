@@ -14,7 +14,9 @@ from app.services.document_ingest_service import DocumentIngestService
 pytestmark = [pytest.mark.integration, pytest.mark.us25]
 
 EXPECTED_PAGE_COUNT = 2
-EXPECTED_CHARACTER_COUNTS = [2469, 1251]
+# 这份 PDF 由 scripts/make_synthetic_corpus.py 自产（不再用上游带进来的真实课程文档），
+# 下面是它输出的真实字符数：改语料就要同步改这里，`--check` 会拦住产物与脚本不一致的情况。
+EXPECTED_CHARACTER_COUNTS = [1837, 902]
 
 
 def test_pdf_parser_extracts_text_from_real_pdf(
