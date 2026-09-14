@@ -233,6 +233,57 @@ Then parseDocumentService.parse() should be called once
 补充建议场景，等待用户确认是否纳入范围。
 ```
 
+## 测试场景质量规则（Definition of Ready + linter）
+
+> 本节解决一个具体问题：场景"写完了"不等于"能支撑开发"。场景若不在**开写实现之前**满足以下条件，
+> 就该退回细化 —— 越晚发现歧义，返工越贵。
+>
+> 契约优先：**凡场景依赖尚未定稿的契约（接口路径、状态码、协议、口径），不得进入 Gate 2**。
+> 这类契约集中在仓库的 `docs/specs/*-contracts.md`（R1 的是 `docs/specs/r1-contracts.md`）；
+> 每条待定契约的未决问题最多 3 个，写成 `[NEEDS CLARIFICATION]`。
+
+### Definition of Ready：一条场景必须带齐
+
+1. **稳定 ID**（如 `T-R1-2.1`）与**父 AC 映射**（父 issue / AC 编号）—— 让追溯矩阵能机械计算覆盖率。
+2. **GIVEN / WHEN / THEN，且只有一个 When**：多个 `When` 说明这条场景混了多个触发动作，应拆成多条。
+   多个 `Then` 只在结果**紧密耦合**时才合法（如"拒绝写入 **并且** 返回 400"）。
+3. **断言可外部观察**：用户可见输出、API 响应、数据库持久化、state transition。
+4. **通过"对手测试"**：自问 *"一个完全错的实现能不能通过这条断言？"* 能通过 = 断言太虚，重写。
+   - ❌ `Then 系统正确响应了` → 什么都通过
+   - ✅ `Then 返回 400，且 body 指出缺失字段名`
+5. **异常场景数 ≥ happy path 数**：全是 happy path 的场景集合不达标。若某条确实没有失败路径
+   （如纯只读查询），显式豁免并写理由：
+   `<!-- lint-ack: error-path — 只读查询，无失败路径 -->`（只允许豁免 warning 级，不豁免 error 级）。
+6. **测试层级 + 落点文件 + 夹具/替身 + 运行命令**：写清这条场景落在 unit / component / integration / contract
+   哪一层，建议文件路径，复用哪些既有 fixture / mock，用什么命令跑。
+7. **DoD 勾选**：完成 = **先红后绿** + 覆盖率门槛 + CI 相关 job 绿 + 文档回填。
+
+### 场景 linter（提交前逐条自查）
+
+| 规则 | 触发条件 | 处理 |
+|---|---|---|
+| `error-path` | 所有场景都是 happy path | 补异常路径，或写 `lint-ack` 理由 |
+| `universal-claim` | 出现"所有 / 每个 / 全部"却只有一条场景 | 每个实例至少 2 条场景，或收窄表述 |
+| `boundary-entry-point` | 声明了多个入口（REST / CLI / MCP / 前端）但场景只覆盖一个 | 每个入口都要有场景，或显式说明本次只覆盖哪个 |
+| `vague-verb` | improve / enhance / handle / 优化 / 处理好 | 换成可计数、可断言的结果 |
+| `unquantified` | "快 / 稳定 / 可用"没有阈值 | 给出数字与判定口径 |
+| `implicit-dep` | 场景没绑定测试落点（`Test:` 选择器 / 文件） | 补落点，否则无法算覆盖 |
+| `testability` | 无法从外部观察 | 改断言对象或改测试层级 |
+| `decision-coverage` | 已定的设计决策没有对应场景 | 补场景，或把决策降级为 `[NEEDS CLARIFICATION]` |
+
+### 追溯矩阵（AC ID → 测试）
+
+交付一个 User Story 前，产出并更新一张矩阵，字段固定：
+
+```text
+AC-ID | 描述 | test issue / 场景 ID | 测试文件 | 测试函数 | 状态(covered/partial/uncovered/not_implemented)
+```
+
+- 状态语义：`covered` 全部条件有断言；`partial` 缺边界/路径；`uncovered` 有实现无测试引用；
+  `not_implemented` 实现本身还没做（与 uncovered 区分开，前者是有意排期，后者是漏）。
+- **`not_implemented` 不是漏项，但必须在矩阵里可见** —— 否则"以为测了"会一直隐瞒到线上。
+- 覆盖率公式（供参考）：`(covered + partial × 0.5) / (total_ac − not_implemented)`。
+
 ## Gate 1 确认
 
 BDD scenarios 后必须询问：
