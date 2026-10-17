@@ -10,5 +10,15 @@ python-pptx>=0.6
 pytesseract>=0.3
 Pillow>=10.0
 sqlite-vec>=0.1.9,<0.2
-fastembed>=0.8,<0.9
+# ⚠️ 这三个版本是一组**已验证可用**的组合，别单独放开（2026-10-17 的 CI 事故）：
+# onnxruntime ≥1.24 起校验 ONNX 外部数据（`model.onnx_data`）必须落在模型真实目录内；
+# 而 huggingface_hub ≥1.32 把 blob 改成**分片存储**，`model.onnx` 与 `model.onnx_data`
+# 这两个符号链接会解析到不同 blob 目录 → 加载 e5-large 直接 Fail：
+#   External data path escapes model directory
+# 最后一次全绿（2026-09-14 的 CI）用的就是下面这组：fastembed 0.8.0 / onnxruntime 1.30.0 /
+# huggingface-hub 1.31.0（1.31 里两个文件仍落在同一个 blob 目录，所以过得去）。
+# 上游 issue：microsoft/onnxruntime#27353（1.24 起禁止 HF cache 的符号链接）。
+fastembed==0.8.0
+onnxruntime==1.30.0
+huggingface-hub==1.31.0
 mcp>=2.0,<3
