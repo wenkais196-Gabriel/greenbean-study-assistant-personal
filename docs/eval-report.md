@@ -1,7 +1,7 @@
 # 评测报告 · 跨语言检索首测（阶段 1 收尾）
 
 > 实验日期：**2026-09-12** ｜ 脚本：[`backend-python/scripts/experiment_chunk_size.py`](../backend-python/scripts/experiment_chunk_size.py)
-> 目的：回答 [`planning/STATUS.md`](../planning/STATUS.md) §五 的**假设 #1**（中文 query 能否检索到法文 chunk）与 **假设 #7**（`chunk_size` 该取多少）
+> 目的：回答阶段 1 的两个悬而未决的问题 —— **假设 #1**（中文 query 能否检索到法文 chunk）与 **假设 #7**（`chunk_size` 该取多少）
 
 ---
 
