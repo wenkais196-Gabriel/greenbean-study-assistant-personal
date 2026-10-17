@@ -18,11 +18,18 @@
   仍指向上游项目 —— 之前"本 fork 不跑扫描"的说法与事实相反，已纠正。
 
 ### Fixed
-- **L1 评测门禁的间接依赖漂移**：`fastembed` / `onnxruntime` 钉到最后一次全绿的组合
-  （0.8.0 / 1.30.0）。不钉的话门禁会红在与业务无关的地方 ——
-  onnxruntime 1.31 + fastembed 0.8.1 加载模型时直接
-  `External data path escapes model directory`。同时把模型缓存指到真实目录
-  （`HF_HOME` / `FASTEMBED_CACHE_PATH`），此前缓存目录根本不存在，等于每次 push 重新下载。
+- **`workspace_id` 上传与会话不一致（R1-2，issue #2）**：上传落库写 `""`、会话写 `"default"`，
+  两边不一致导致按 workspace 过滤必然滤空，多工作区无从谈起。现在缺省工作区只有一份常量
+  （`app/config/settings.py` 的 `DEFAULT_WORKSPACE_ID`），`submit` 把 `None` / 空串 / 纯空白
+  统一收敛到它；`GET /api/documents?workspace_id=` 把过滤下推到 SQL，空值等于"全部"（不是筛空串）。
+  验收场景见 issue #11 / #12 / #13；新增 13 条测试（Python 530 → 543，覆盖率仍 100%）。
+- **L1 评测门禁加载不了模型（`External data path escapes model directory`）**：真凶是
+  `huggingface_hub >= 1.32` 把 blob 改成分片存储 —— `model.onnx` 与 `model.onnx_data`
+  两个符号链接解析到**不同** blob 目录，而 `onnxruntime >= 1.24` 校验外部数据必须与模型同目录
+  （上游 issue microsoft/onnxruntime#27353）。修复：`fastembed` / `onnxruntime` /
+  `huggingface-hub` 钉到 2026-09-14 最后一次全绿的组合（0.8.0 / 1.30.0 / 1.31.0）。
+  顺带把模型缓存指到**真实**目录（`HF_HOME` / `FASTEMBED_CACHE_PATH`）：此前缓存的目录
+  在 Linux 上根本不存在，等于每次 push 重新下载。
 
 ### Added
 - 版本管理方案与公开路线图：[`docs/versioning.md`](docs/versioning.md)、[`docs/roadmap.md`](docs/roadmap.md)、本文件。

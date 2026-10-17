@@ -150,12 +150,18 @@ def get_document_query_service() -> DocumentQueryService:
 @router.get("", responses=_RESPONSE_500_INTERNAL_ERROR)
 async def list_documents(
     query_service: Annotated[DocumentQueryService, Depends(get_document_query_service)],
+    workspace_id: str = "",
 ):
     """列出已上传的文档（新的在前），供界面左侧文件列表使用。
 
+    `?workspace_id=` 可选：给了就只看该工作区的文档；**不传或传空值都等于"全部"** ——
+    空串是"没有值"，不能当成一个真实的工作区去筛（那会静默返回空列表）。
+
     一份文档都没有时返回**空数组**而不是 404 —— "还没上传资料"是正常状态，不是错误。
     """
-    records = await run_in_threadpool(query_service.list_documents)
+    records = await run_in_threadpool(
+        query_service.list_documents, workspace_id=workspace_id.strip() or None
+    )
 
     return {
         "code": 200,

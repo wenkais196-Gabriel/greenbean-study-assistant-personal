@@ -28,6 +28,11 @@
 | 检索已支持 workspace 过滤（pre-filter 子查询） | `repositories/embedding_repository.py` 的 `workspace_id` 参数；`app/tools/adapters.py` 的 `ProductionChunkSearcher.search` |
 | 响应信封与错误口径 | 成功：`{"code": 200, "message": "ok", "data": ...}`（`provider_controller` 用裸 `response_model`）；错误：HTTP 状态码 + `detail` |
 
+> **R1-2 落地后（2026-10-17）**：上表里"上传落库 `workspace_id = ""`"这一行已成历史 ——
+> `ingest_job_service.submit` 的缺省值改为 `app/config/settings.py` 的 `DEFAULT_WORKSPACE_ID`，
+> 与会话侧同一份常量；`GET /api/documents` 支持 `?workspace_id=`（空值 = 不过滤）。
+> 表本身保留，作为"修之前是什么样"的追溯依据（事实基线的作用就是如此）。
+
 ---
 
 ## C1 · 流式协议 `[定稿]`

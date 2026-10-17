@@ -13,6 +13,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from app.config.settings import DEFAULT_WORKSPACE_ID
 from app.db.models import Base
 from app.entities import DocumentRecord, DocumentUnit
 from app.enums import IngestJobStatus, IngestStage
@@ -317,3 +318,62 @@ def test_run_on_an_unknown_job_is_a_no_op(session_factory):
     service.run("does-not-exist", "cours.pdf", b"pdf-bytes")
 
     assert service.get("does-not-exist") is None
+
+
+# ========== R1-2：workspace_id 归一化 ==========
+
+
+class WorkspaceRecordingIngestService(FakeIngestService):
+    """记录 `ingest_document` 收到的 workspace_id（摄取层写了什么才是最终事实）。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.workspace_ids: list[str] = []
+
+    def ingest_document(self, filename, content, *, on_progress=None, **kwargs):
+        self.workspace_ids.append(kwargs["workspace_id"])
+        return super().ingest_document(filename, content, on_progress=on_progress, **kwargs)
+
+
+def test_submit_defaults_to_the_shared_default_workspace(session_factory):
+    """没给 workspace → job 落 `DEFAULT_WORKSPACE_ID`，不是空串。
+
+    空串会让 `workspace_id = "default"` 的列表 / 检索过滤静默滤空（R1-2 的 bug 本体）。
+    """
+    service = make_service(session_factory, FakeIngestService())
+
+    job = service.submit("cours.pdf", b"pdf-bytes")
+
+    assert job.workspace_id == DEFAULT_WORKSPACE_ID
+    stored = service.get(job.id)
+    assert stored is not None
+    assert stored.workspace_id == DEFAULT_WORKSPACE_ID
+
+
+@pytest.mark.parametrize("blank", ["", "   ", None])
+def test_submit_treats_blank_workspace_as_missing(session_factory, blank):
+    """`None` / 空串 / 纯空白语义相同：都算"没给"（不能一个落 ""、一个落 "default"）。"""
+    service = make_service(session_factory, FakeIngestService())
+
+    job = service.submit("cours.pdf", b"pdf-bytes", workspace_id=blank)
+
+    assert job.workspace_id == DEFAULT_WORKSPACE_ID
+
+
+def test_submit_keeps_an_explicit_workspace_but_strips_blanks(session_factory):
+    service = make_service(session_factory, FakeIngestService())
+
+    job = service.submit("cours.pdf", b"pdf-bytes", workspace_id="  course-agile  ")
+
+    assert job.workspace_id == "course-agile"
+
+
+def test_run_normalizes_workspace_before_ingesting(session_factory):
+    """`run` 也可能被直接投递（重试 / 脚本 / 测试），不能只靠 `submit` 归一化。"""
+    ingest = WorkspaceRecordingIngestService()
+    service = make_service(session_factory, ingest)
+    job = service.submit("cours.pdf", b"pdf-bytes")
+
+    service.run(job.id, "cours.pdf", b"pdf-bytes", workspace_id="   ")
+
+    assert ingest.workspace_ids == [DEFAULT_WORKSPACE_ID]

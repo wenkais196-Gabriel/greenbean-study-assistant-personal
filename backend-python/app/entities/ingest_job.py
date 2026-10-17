@@ -3,6 +3,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from app.config.settings import DEFAULT_WORKSPACE_ID
 from app.enums.ingest_job_status import IngestJobStatus
 from app.enums.ingest_stage import IngestStage
 

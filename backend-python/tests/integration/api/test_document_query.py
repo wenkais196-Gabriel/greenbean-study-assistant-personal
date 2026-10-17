@@ -116,6 +116,32 @@ class TestListDocuments:
 
         assert response.json()["data"][0]["page_count"] is None
 
+    @pytest.mark.us25
+    def test_workspace_filter_is_forwarded_to_service(self):
+        """`?workspace_id=course-agile` → service 收到该值（过滤由 service 下推到 SQL）。"""
+        self.mock_service.list_documents.return_value = []
+
+        response = self.client.get("/api/documents", params={"workspace_id": "course-agile"})
+
+        assert response.status_code == 200
+        self.mock_service.list_documents.assert_called_once_with(workspace_id="course-agile")
+
+    @pytest.mark.us25
+    def test_omitted_or_blank_workspace_means_no_filter(self):
+        """不传 / 空值 / 纯空白都等于"全部" —— 空串绝不能变成一个真实工作区去筛。
+
+        这是 R1-2 最容易被写错的边界：`?workspace_id=` 被当成 `workspace_id = ''` 时，
+        列表会静默变成空数组。
+        """
+        for params in ({}, {"workspace_id": ""}, {"workspace_id": "   "}):
+            self.mock_service.reset_mock()
+            self.mock_service.list_documents.return_value = []
+
+            response = self.client.get("/api/documents", params=params)
+
+            assert response.status_code == 200, params
+            self.mock_service.list_documents.assert_called_once_with(workspace_id=None)
+
 
 class TestListDocumentUnits:
     """`GET /api/documents/{document_id}/units`"""

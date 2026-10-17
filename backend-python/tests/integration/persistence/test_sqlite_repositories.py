@@ -380,6 +380,40 @@ def test_document_repository_list_all_returns_empty_list_when_no_documents(sessi
         assert DocumentRepository(session).list_all() == []
 
 
+def test_document_repository_list_all_filters_by_workspace(session_factory):
+    """按工作区过滤落在 SQL 上：`?workspace_id=` 只返回该工作区的文档。
+
+    三行断言对应契约 C5 的三种调用：不传 = 全部、给值 = 收窄、给不存在的值 = 空数组（不是 404）。
+    这一条是 R1-2 的回归锁：上传侧一旦重新写空串，`workspace_id = "default"` 就会变成空集。
+    """
+    agile = DocumentRecord(
+        workspace_id="course-agile",
+        title="敏捷",
+        original_filename="agile.pdf",
+        file_type=DocumentFileType.PDF,
+        file_path="data/uploads/agile.pdf",
+    )
+    maths = DocumentRecord(
+        workspace_id="course-maths",
+        title="数学",
+        original_filename="maths.pdf",
+        file_type=DocumentFileType.PDF,
+        file_path="data/uploads/maths.pdf",
+    )
+    with session_factory() as session:
+        DocumentRepository(session).save(agile)
+        DocumentRepository(session).save(maths)
+        session.commit()
+
+    with session_factory() as session:
+        repository = DocumentRepository(session)
+        assert {record.title for record in repository.list_all()} == {"敏捷", "数学"}
+        assert [record.title for record in repository.list_all(workspace_id="course-agile")] == [
+            "敏捷"
+        ]
+        assert repository.list_all(workspace_id="course-empty") == []
+
+
 def test_document_unit_repository_list_by_document_orders_by_sequence_index(session_factory):
     """单元按 sequence_index 升序 —— 顺序必须来自查询，而不是插入顺序。"""
     document = DocumentRecord(

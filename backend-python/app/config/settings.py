@@ -9,6 +9,12 @@ Python 后端的集中运行配置。
 DATA_DIR = "data"
 DATABASE_NAME = "greenbean-study-assistant.sqlite3"
 
+# ---- 工作区 ----
+# 缺省工作区的**唯一来源**（R1-2）：请求未指定 workspace 时，上传与问答都落这里。
+# 前端 `src/features/chat/api/chatApi.ts` 的同名字面量必须与它一致；改这里就等于改口径。
+# 之前上传写 ""、会话写 "default"，按 workspace 过滤会把文档全滤掉 —— 空串不是"缺省"，是"没有值"。
+DEFAULT_WORKSPACE_ID = "default"
+
 # ---- 向量化 ----
 # 模型选型（2026-09-12 由 MiniLM-L12-v2 换为 e5-large，依据 docs/retrieval-diagnosis.md §3.7 的对照）：
 # - 命中率：中文 @5 50% → 66.7%、@20 91.7% → 100%；法语 @5（同语言基线）50% → 83.3%

@@ -40,7 +40,7 @@
 
 实测基线（本机 Windows / Python 3.12 / Node 24）：
 
-- Python：`530 passed`，覆盖率 `100%`（`fail_under=100` 硬门槛）
+- Python：`543 passed`，覆盖率 `100%`（`fail_under=100` 硬门槛）
 - 前端：`311 passed`（21 个测试文件）
 - 检索（L1，**私人语料** 40 条可评测）：HitRate@5 `90.0%`、@20 `97.5%`、MRR `0.845`
   —— 见 [`docs/eval-report-golden.md`](docs/eval-report-golden.md)、[`eval/README.md`](eval/README.md)。

@@ -10,6 +10,7 @@
 """
 from datetime import datetime, timezone
 
+from app.config.settings import DEFAULT_WORKSPACE_ID as DEFAULT_WORKSPACE_ID  #: 单一来源见 settings
 from app.db.orm import SessionFactory
 from app.entities import ChatMessage, ChatSession
 from app.enums.message_role import MessageRole
@@ -17,8 +18,9 @@ from app.repositories.chat_message_repository import ChatMessageRepository
 from app.repositories.chat_session_repository import ChatSessionRepository
 
 #: 缺省工作区：请求不带 `workspace_id` 时用它归档。
-#: 与前端 `src/features/chat/api/chatApi.ts` 的 `DEFAULT_WORKSPACE_ID` 保持一致。
-DEFAULT_WORKSPACE_ID = "default"
+#: 值由 `app/config/settings.py` 提供（R1-2 起不再在这里写字面量），
+#: 导入名保留是为了既有调用方与测试仍从本模块取到同一份常量。
+__all__ = ["DEFAULT_WORKSPACE_ID", "SESSION_TITLE_MAX_CHARS", "ChatSessionService"]
 
 #: 会话标题长度上限（取首问前 N 字）：够看出是哪次对话即可。
 SESSION_TITLE_MAX_CHARS = 30
