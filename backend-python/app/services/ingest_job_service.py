@@ -12,6 +12,7 @@
 from concurrent.futures import Executor, ThreadPoolExecutor
 from datetime import datetime, timezone
 
+from app.config.settings import DEFAULT_WORKSPACE_ID
 from app.db.orm import SessionFactory
 from app.entities import IngestJob
 from app.enums import IngestJobStatus, IngestStage
@@ -28,6 +29,15 @@ _STAGE_PROGRESS: dict[IngestStage, tuple[float, float]] = {
 
 # 嵌入是 CPU 密集的：再多的 worker 只会互相抢核，不会更快。
 DEFAULT_MAX_WORKERS = 2
+
+
+def _normalize_workspace_id(workspace_id: str | None) -> str:
+    """把"没给工作区"收敛成缺省工作区。
+
+    `None` / 空串 / 纯空白都算没给 —— 它们语义相同，不能一个落 `""`、一个落 `"default"`。
+    显式给的 id 保留原值（只去掉首尾空白）。
+    """
+    return (workspace_id or "").strip() or DEFAULT_WORKSPACE_ID
 
 
 class IngestJobService:
@@ -56,18 +66,24 @@ class IngestJobService:
         filename: str,
         content: bytes,
         *,
-        workspace_id: str = "",
+        workspace_id: str | None = None,
         title: str | None = None,
     ) -> IngestJob:
-        """受理一次上传：先把 job 落库（queued），再投递到后台，**不等它跑完**。"""
-        job = IngestJob(filename=filename, workspace_id=workspace_id)
+        """受理一次上传：先把 job 落库（queued），再投递到后台，**不等它跑完**。
+
+        未指定工作区（`None` / 空串 / 纯空白）一律归到 `DEFAULT_WORKSPACE_ID`，
+        与会话侧**同一份常量**（`app/config/settings.py`）。空串不是"缺省"：
+        它会让 `workspace_id = "default"` 的过滤静默滤空（R1-2 修的就是这个）。
+        """
+        normalized = _normalize_workspace_id(workspace_id)
+        job = IngestJob(filename=filename, workspace_id=normalized)
         self._save(job)
         self.executor.submit(
             self.run,
             job.id,
             filename,
             content,
-            workspace_id=workspace_id,
+            workspace_id=normalized,
             title=title,
         )
         return job
@@ -92,6 +108,9 @@ class IngestJobService:
 
         **不向外抛异常**：这里已经是"没人接得住"的地方（线程池 worker），
         错误必须落到 job 上由客户端轮询看到。
+
+        `workspace_id` 在这里再归一化一次：`run` 也可能被直接投递（重试、测试、脚本），
+        不能只靠 `submit` 保证——归一化是幂等的，重复调用没有副作用。
         """
         self._update(job_id, status=IngestJobStatus.RUNNING, stage=None, progress=0.0)
 
@@ -99,7 +118,7 @@ class IngestJobService:
             result = self.ingest_service.ingest_document(
                 filename,
                 content,
-                workspace_id=workspace_id,
+                workspace_id=_normalize_workspace_id(workspace_id),
                 title=title,
                 on_progress=lambda stage, ratio: self._report_progress(job_id, stage, ratio),
                 job_id=job_id,

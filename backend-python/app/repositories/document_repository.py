@@ -34,18 +34,18 @@ class DocumentRepository:
             return None
         return self._to_entity(model)
 
-    def list_all(self) -> list[DocumentRecord]:
-        """全部文档，按创建时间**倒序**（新的在前）—— 供界面左侧列表使用。
+    def list_all(self, workspace_id: str | None = None) -> list[DocumentRecord]:
+        """文档列表，按创建时间**倒序**（新的在前）—— 供界面左侧列表使用。
 
-        **不按 workspace 过滤**：上传落库的 `workspace_id` 是 `""`，而会话落库用的是
-        `"default"`，两者并不一致 —— 按它过滤会把所有文档都滤掉。详见
-        `app/services/document_query_service.py` 的模块说明。
+        :param workspace_id: 只看该工作区的文档；`None`（默认）= 全部 ——
+            "不传"与"传空串"必须由调用方区分清楚：`None` 是"不筛"，`""` 会筛出空集。
+            R1-2 之前上传落库写 `""`，所以这里不能过滤（会把全部文档滤掉）；
+            现在上传与会话都落 `DEFAULT_WORKSPACE_ID`，过滤才有意义。
         """
-        models = (
-            self.session.query(DocumentRecordModel)
-            .order_by(DocumentRecordModel.created_at.desc())
-            .all()
-        )
+        query = self.session.query(DocumentRecordModel)
+        if workspace_id is not None:
+            query = query.filter(DocumentRecordModel.workspace_id == workspace_id)
+        models = query.order_by(DocumentRecordModel.created_at.desc()).all()
         return [self._to_entity(model) for model in models]
 
     @staticmethod

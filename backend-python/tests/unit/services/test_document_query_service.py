@@ -32,7 +32,18 @@ class TestListDocuments:
         result = make_service(mock_session).list_documents()
 
         assert result is records
-        MockRepository.return_value.list_all.assert_called_once_with()
+        MockRepository.return_value.list_all.assert_called_once_with(workspace_id=None)
+
+    @patch("app.services.document_query_service.DocumentRepository")
+    def test_forwards_workspace_filter(self, MockRepository, mock_session):
+        """工作区过滤原样交给 repository（过滤必须落在 SQL，不在 Python 里筛全量）。"""
+        MockRepository.return_value.list_all.return_value = []
+
+        make_service(mock_session).list_documents(workspace_id="course-agile")
+
+        MockRepository.return_value.list_all.assert_called_once_with(
+            workspace_id="course-agile"
+        )
 
 
 class TestListUnits:
