@@ -75,6 +75,14 @@ jobs:
   eval-gate:
     name: L1 Retrieval Eval Gate
     runs-on: ubuntu-latest
+    env:
+      # 模型缓存必须落在**真实**的缓存目录上，否则这一步等于装饰：
+      # 之前缓存的是 ~/.cache/fastembed，而 fastembed 在 Linux 上根本不写那里 ——
+      # 2026-09-14 的日志里就是 "Cache not found" + 结尾 "[warning] Path(s) ... do(es) not exist,
+      # hence no cache is being saved"，于是每次 push 都重新从 HF Hub 下载（匿名限流，随时可能 429）。
+      # 两个变量各覆盖一种实现：huggingface_hub（fastembed 0.8.0）与 fastembed 自己的 cache（0.8.1+）。
+      HF_HOME: ${{ github.workspace }}/.cache/huggingface
+      FASTEMBED_CACHE_PATH: ${{ github.workspace }}/.cache/fastembed
 
     steps:
       - name: Checkout repository
@@ -97,7 +105,9 @@ jobs:
       - name: Cache fastembed models
         uses: actions/cache@v4
         with:
-          path: ~/.cache/fastembed
+          path: |
+            .cache/huggingface
+            .cache/fastembed
           key: fastembed-${{ runner.os }}-${{ hashFiles('backend-python/requirements.txt') }}
 
       - name: Run L1 retrieval eval gate

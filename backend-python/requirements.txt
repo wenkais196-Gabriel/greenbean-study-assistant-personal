@@ -10,5 +10,10 @@ python-pptx>=0.6
 pytesseract>=0.3
 Pillow>=10.0
 sqlite-vec>=0.1.9,<0.2
-fastembed>=0.8,<0.9
+# ⚠️ fastembed / onnxruntime 必须钉到「最后一次全绿」的组合（2026-09-14 CI：0.8.0 + 1.30.0）。
+# 放开后 2026-10-17 的 CI 直接红在 L1 门禁上：fastembed 0.8.1 换了缓存布局（/tmp/fastembed_cache/blobs），
+# onnxruntime 1.31 收紧了 ONNX 外部数据路径校验（"External data path escapes model directory"），
+# 模型一加载就 Fail —— 与业务代码无关，纯粹是间接依赖漂移。
+fastembed==0.8.0
+onnxruntime==1.30.0
 mcp>=2.0,<3
