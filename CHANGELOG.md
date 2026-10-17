@@ -12,9 +12,17 @@
 
 ### Docs
 - **发布锚点与死引用清理**（为 v0.1.0 打 tag 做准备）：`docs/roadmap.md` 不再指向私有的 `planning/19`，
-  `CHANGELOG.md` 的版本对齐口径改为 `docs/versioning.md`，两份 L2 评测报告去掉 `planning/10` 引用，
-  `AGENTS.md` 增加"公开文档不得引用 `planning/`"的规则，`sonar-project.properties` 顶部写明
-  **本 fork 不跑 Sonar 扫描**（无 `SONAR_TOKEN`，CI 无 sonar job），避免配置看起来像已生效的门禁。
+  `CHANGELOG.md` 的版本对齐口径改为 `docs/versioning.md`，两份 L2 评测报告去掉 `planning/10` 引用。
+- `sonar-project.properties` 顶部写明它**不驱动**扫描：本仓库的 SonarCloud 扫描来自 GitHub App 的
+  Automatic Analysis（每个 PR 都跑，Automatic Analysis 不读该文件），且文件里的 `projectKey`
+  仍指向上游项目 —— 之前"本 fork 不跑扫描"的说法与事实相反，已纠正。
+
+### Fixed
+- **L1 评测门禁的间接依赖漂移**：`fastembed` / `onnxruntime` 钉到最后一次全绿的组合
+  （0.8.0 / 1.30.0）。不钉的话门禁会红在与业务无关的地方 ——
+  onnxruntime 1.31 + fastembed 0.8.1 加载模型时直接
+  `External data path escapes model directory`。同时把模型缓存指到真实目录
+  （`HF_HOME` / `FASTEMBED_CACHE_PATH`），此前缓存目录根本不存在，等于每次 push 重新下载。
 
 ### Added
 - 版本管理方案与公开路线图：[`docs/versioning.md`](docs/versioning.md)、[`docs/roadmap.md`](docs/roadmap.md)、本文件。
