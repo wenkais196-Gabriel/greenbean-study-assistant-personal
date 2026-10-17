@@ -278,6 +278,9 @@ python -m pip install -r requirements-dev.txt
 - Python 实体和测试中的部分中文描述当前呈现为乱码，疑似历史编码问题。除非任务要求修复编码，否则不要顺手大范围改写，以免扩大变更。
   （在 Windows 控制台里跑 pytest 时，中文输出显示为乱码也是同一个原因，**不代表文件内容坏了**。）
 - `planning/` 是本地私有的规划与决策记录（已加入 `.gitignore`），不要提交到仓库，也不要把它当作公开文档改写。
+  **公开文档（README / CHANGELOG / `docs/roadmap.md` / 评测报告）不得引用 `planning/` 下的路径** ——
+  外部读者点不进去，等于挂了一堆死链接；需要引用依据时，写进本仓库已有的契约 / 规格文件。
+  （`docs/specs/` 里的历史设计依据仍是 `planning/…` 链接，属既定事实，不再逐个改写。）
   R1 的**验收测试场景**也在其中：`planning/r1-scenarios/batch-*.md` 是场景正文的单一来源，
   `planning/apply-r1-scenarios.mjs` 负责同步到 GitHub（幂等 + 回读逐字校验），
   `planning/audit-r1-scenarios.mjs` 按质量规则自查，`planning/r1-traceability.md` 是 AC → 场景 → 测试落点的矩阵。

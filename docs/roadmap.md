@@ -3,7 +3,8 @@
 > **⚠️ 非承诺**：个人项目，节奏随真实用户反馈调整。
 > 组织方式：按 **结果（outcome）** 而不是功能清单；**不写超过 6 周的具体日期**（那多半是虚构）。
 > 版本与里程碑的对应关系见 [`versioning.md`](versioning.md)，变更历史见 [`../CHANGELOG.md`](../CHANGELOG.md)。
-> R1 的任务拆解与验收判据详见私有规划（`planning/19`），这里只放对外可讲的部分。
+> R1 的验收判据在 [`specs/r1-contracts.md`](specs/r1-contracts.md)（契约与决策的单一事实源），
+> 逐条测试场景以 GitHub issue 落地（`label:test`），这里只放对外可讲的部分。
 
 ## 这个项目是什么
 

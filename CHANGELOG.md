@@ -1,7 +1,7 @@
 # Changelog
 
 本文件记录**本 fork** 的变更（格式：[Keep a Changelog](https://keepachangelog.com/)；
-版本号遵循 [SemVer](https://semver.org/)，与 `planning/` 的里程碑对齐，见 [`docs/versioning.md`](docs/versioning.md)）。
+版本号遵循 [SemVer](https://semver.org/)，与 [`docs/versioning.md`](docs/versioning.md) 的里程碑对齐）。
 
 > **归属说明**：本仓库是 [`GreenBeanICE/greenbean-study-assistant`](https://github.com/GreenBeanICE/greenbean-study-assistant)（MIT）的
 > 个人 fork 续作。**上游历史不在此重复**（fork 点 = 上游 `5e79877`）；
@@ -9,6 +9,12 @@
 > [#26](https://github.com/GreenBeanICE/greenbean-study-assistant/pull/26)（48 files / +5466 行：多格式解析器与摄取管线）。
 
 ## [Unreleased]
+
+### Docs
+- **发布锚点与死引用清理**（为 v0.1.0 打 tag 做准备）：`docs/roadmap.md` 不再指向私有的 `planning/19`，
+  `CHANGELOG.md` 的版本对齐口径改为 `docs/versioning.md`，两份 L2 评测报告去掉 `planning/10` 引用，
+  `AGENTS.md` 增加"公开文档不得引用 `planning/`"的规则，`sonar-project.properties` 顶部写明
+  **本 fork 不跑 Sonar 扫描**（无 `SONAR_TOKEN`，CI 无 sonar job），避免配置看起来像已生效的门禁。
 
 ### Added
 - 版本管理方案与公开路线图：[`docs/versioning.md`](docs/versioning.md)、[`docs/roadmap.md`](docs/roadmap.md)、本文件。
